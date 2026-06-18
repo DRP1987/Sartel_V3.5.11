@@ -1,0 +1,32 @@
+{
+  "documents": [
+    {
+      "name": "User manual BB Suivo_Extended general",
+      "pdf_path": "config/docs/User manual_Black box Suivo extended_Iss1.pdf"
+    },
+    {
+      "name": "Installation example_GMK6300L-ECOS",
+      "pdf_path": ""
+    },
+    {
+      "name": "Installation example_Liebherr_LTM+2018",
+      "pdf_path": "config/docs/Installation example_Liebherr_LTM+2018.pdf"
+    },
+    {
+      "name": "BB connection sheet_Double_V1",
+      "pdf_path": "config/docs/BB connection sheet_Double_V1.pdf"
+    },
+    {
+      "name": "BB connection sheet_Pulse_V1",
+      "pdf_path": "config/docs/BB connection sheet_Pulse_V1.pdf"
+    },
+    {
+      "name": "BB connection sheet_Single_V1",
+      "pdf_path": "config/docs/BB connection sheet_Single_V1.pdf"
+    },
+    {
+      "name": "BB connection sheet_Trailer_V1",
+      "pdf_path": "config/docs/BB connection sheet_Trailer_V1.pdf"
+    }
+  ]
+}
