@@ -606,7 +606,7 @@ class MonitoringScreen(QWidget):
             widgets['status_lbl'].setText(status_str)
             if status_str == 'Flash':
                 # Flashing lamps are driven by the timer; set initial on-state here
-                new_flashing.add(key)
+                new_flashing.add(key)  # key is always valid: we iterate dm1_lamp_labels
                 bg_color = widgets['on_color']
                 text_color = '#ffffff'
             else:
@@ -623,11 +623,9 @@ class MonitoringScreen(QWidget):
         # Start or stop the flash timer depending on whether any lamp is flashing
         self.dm1_flashing_lamps = new_flashing
         if new_flashing and not self.dm1_flash_timer.isActive():
-            self.dm1_flash_state = True  # start with lamp colour visible
             self.dm1_flash_timer.start()
         elif not new_flashing and self.dm1_flash_timer.isActive():
             self.dm1_flash_timer.stop()
-            self.dm1_flash_state = False
 
         # --- Rebuild DTC table from all sources ---
         self.dm1_dtc_table.setRowCount(0)
@@ -670,9 +668,7 @@ class MonitoringScreen(QWidget):
         """
         self.dm1_flash_state = not self.dm1_flash_state
         for key in self.dm1_flashing_lamps:
-            widgets = self.dm1_lamp_labels.get(key)
-            if widgets is None:
-                continue
+            widgets = self.dm1_lamp_labels[key]
             if self.dm1_flash_state:
                 bg = widgets['on_color']
                 text_color = '#ffffff'
