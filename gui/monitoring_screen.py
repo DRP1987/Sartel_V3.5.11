@@ -81,6 +81,10 @@ class MonitoringScreen(QWidget):
         self.override_mode = False  # False = Append mode, True = Override mode
         self.override_row_map: Dict[int, int] = {}  # {can_id: row_index} for override mode
 
+        # Latest message data per CAN ID — never trimmed, used to keep rows stable
+        # in override mode even when old messages are evicted from display_messages.
+        self.last_known_message: Dict[int, Dict[str, Any]] = {}
+
         # CAN ID column sort state (True = ascending, False = descending)
         self._sort_ascending = True
 
@@ -880,18 +884,30 @@ class MonitoringScreen(QWidget):
     def _populate_table_override_mode(self):
         """Populate table in override mode - one row per CAN ID."""
         self.override_row_map.clear()
+
+        # Build a map of the latest message per CAN ID using last_known_message
+        # (which is never trimmed) so that CAN IDs with long cycle times remain
+        # visible even after old buffer entries are evicted.
         latest_messages = {}
-        
-        # Get latest message for each CAN ID by iterating backwards
-        # This finds the most recent message efficiently
-        for msg_data in reversed(self.display_messages):
-            can_id = msg_data['can_id']
-            if can_id in self.filtered_can_ids and can_id not in latest_messages:
-                latest_messages[can_id] = msg_data
-                # Optimization: stop early if we've found all filtered IDs
-                if len(latest_messages) == len(self.filtered_can_ids):
-                    break
-        
+
+        # Start with last_known_message as the authoritative source for every
+        # CAN ID that has been seen and is currently checked in the filter.
+        for can_id in self.filtered_can_ids:
+            if can_id in self.last_known_message:
+                latest_messages[can_id] = self.last_known_message[can_id]
+
+        # Also scan display_messages in reverse to pick up any filtered CAN IDs
+        # not yet in last_known_message (e.g. during the very first batch before
+        # last_known_message is populated for that ID).  This loop exits early
+        # once all filtered IDs are covered.
+        if len(latest_messages) < len(self.filtered_can_ids):
+            for msg_data in reversed(self.display_messages):
+                can_id = msg_data['can_id']
+                if can_id in self.filtered_can_ids and can_id not in latest_messages:
+                    latest_messages[can_id] = msg_data
+                    if len(latest_messages) == len(self.filtered_can_ids):
+                        break
+
         # Add rows sorted by CAN ID
         for can_id in sorted(latest_messages.keys()):
             row = self.log_table.rowCount()
@@ -1279,7 +1295,13 @@ class MonitoringScreen(QWidget):
         # Get all pending messages and clear queue
         messages_to_add = self.pending_display_messages.copy()
         self.pending_display_messages.clear()
-        
+
+        # Update last_known_message before anything else so that _rebuild_table()
+        # (triggered on buffer overflow below) always has up-to-date data for
+        # every CAN ID, including those with long cycle times.
+        for msg_data in messages_to_add:
+            self.last_known_message[msg_data['can_id']] = msg_data
+
         # Add to display buffer
         self.display_messages.extend(messages_to_add)
         
