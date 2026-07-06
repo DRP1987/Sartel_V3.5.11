@@ -456,9 +456,9 @@ class MonitoringScreen(QWidget):
 
         # Lamp definitions: (key, display name, on-colour, off-colour)
         lamp_defs = [
-            ('red_stop',       'Red Stop\nLamp',       '#dc3545', '#e9ecef'),
-            ('amber_warning',  'Amber Warning\nLamp',  '#fd7e14', '#e9ecef'),
-            ('protect',        'Protect\nLamp',        '#dc3545', '#e9ecef'),
+            ('check_engine',   'Check Engine\nLamp',           '#fd7e14', '#e9ecef'),
+            ('amber_warning',  'Amber Warning\nLamp',          '#fd7e14', '#e9ecef'),
+            ('red_stop',       'Red Stop\nLamp',               '#dc3545', '#e9ecef'),
             ('aftertreatment', 'Aftertreatment\n(AdBlue/Exhaust)', '#007bff', '#e9ecef'),
         ]
 
@@ -572,15 +572,15 @@ class MonitoringScreen(QWidget):
         """
         from PyQt5.QtWidgets import QTableWidgetItem
 
-        # Lamp priority order: Off < Fast Flash < Slow Flash < On
+        # Lamp priority order: Off < On < Flash
         # Unknown values get -1 so they never override a known status.
-        _LAMP_PRIORITY = {'Off': 0, 'Fast Flash': 1, 'Slow Flash': 2, 'On': 3}
+        _LAMP_PRIORITY = {'Off': 0, 'On': 1, 'Flash': 2}
 
         # --- Aggregate lamp status (worst-case across all sources) ---
         agg_lamps: Dict[str, str] = {
-            'red_stop':       'Off',
+            'check_engine':   'Off',
             'amber_warning':  'Off',
-            'protect':        'Off',
+            'red_stop':       'Off',
             'aftertreatment': 'Off',
         }
         for decoded in self.dm1_data_by_source.values():
