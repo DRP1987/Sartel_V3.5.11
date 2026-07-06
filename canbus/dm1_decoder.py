@@ -5,13 +5,12 @@ from typing import Dict, List, Any, Tuple
 # J1939 PGN for DM1 — Active Diagnostic Trouble Codes
 DM1_PGN = 0xFECA
 
-# Human-readable descriptions for each 2-bit lamp value
-_LAMP_STATUS: Dict[int, str] = {
-    0b00: "Off",
-    0b01: "On",
-    0b10: "Fast Flash",
-    0b11: "Slow Flash",
-}
+# Valid 2-bit lamp/flash field values (per J1939 DM1 lamp encoding used here):
+#   0b00 (0) = Off / Flash off  → "Off"
+#   0b01 (1) = On  / Flash on   → "On"
+#   0b10 (2) = ignore           → treated as Off
+#   0b11 (3) = ignore (all FFs) → treated as Off
+_LAMP_ON_VALUE = 0b01
 
 # J1939 Failure Mode Identifier descriptions
 FMI_DESCRIPTIONS: Dict[int, str] = {
@@ -218,9 +217,13 @@ def get_dtc_description(spn: int, fmi: int) -> str:
     return SPN_FMI_DESCRIPTIONS.get((spn, fmi), "Unknown")
 
 
-def _lamp_status(byte: int, shift: int) -> str:
-    """Extract a 2-bit lamp status field and return its human-readable string."""
-    return _LAMP_STATUS.get((byte >> shift) & 0x03, "Off")
+def _lamp_on(byte: int, shift: int) -> bool:
+    """Return True only if the 2-bit field at *shift* is exactly 0b01 (On/Flash-on).
+
+    Any value other than 0b01 is treated as Off/ignore per the DM1 spec used here.
+    This prevents 0xFF bytes from spuriously activating all lamps.
+    """
+    return ((byte >> shift) & 0x03) == _LAMP_ON_VALUE
 
 
 def decode_dm1(data: List[int]) -> Dict[str, Any]:
@@ -228,12 +231,20 @@ def decode_dm1(data: List[int]) -> Dict[str, Any]:
     Decode a DM1 (Active DTCs) J1939 message from PGN 0xFECA.
 
     Message byte layout (0-indexed, little-endian SPNs):
-    • Byte 0  — Lamp status overview
-                  bits 1-0 : Red Stop Lamp  (0=off, 1=on, 2=fast-flash, 3=slow-flash)
-                  bits 3-2 : Amber Warning Lamp
-                  bits 5-4 : Protect Lamp
-                  bits 7-6 : Aftertreatment Lamp (AdBlue / exhaust indicator)
-    • Byte 1  — Flash lamp status (same bit layout as byte 0); retained but not displayed
+    • Byte 0  — Lamp on/off status
+                  bits 1-0 : Check Engine Lamp      (0b01=On, others=Off/ignore)
+                  bits 3-2 : Amber Warning Lamp      (0b01=On, others=Off/ignore)
+                  bits 5-4 : Red Stop Lamp           (0b01=On, others=Off/ignore)
+                  bits 7-6 : Aftertreatment Lamp     (0b01=On, others=Off/ignore)
+                  NOTE: 0xFF → all 2-bit fields are 0b11 → all lamps Off (ignored)
+    • Byte 1  — Flash lamp status (same bit layout as byte 0)
+                  bits 1-0 : Flash Check Engine Lamp (0b01=Flash, others=no-flash/ignore)
+                  bits 3-2 : Flash Amber Warning Lamp
+                  bits 5-4 : Flash Red Stop Lamp
+                  bits 7-6 : Flash Aftertreatment Lamp
+                  Lamp status = "Flash" when byte-0 bit = On AND byte-1 bit = Flash,
+                                "On"    when byte-0 bit = On AND byte-1 bit ≠ Flash,
+                                "Off"   otherwise.
     • First DTC (bytes 2–4):
                   bytes 2-3: SPN bits  0-15 (little-endian)
                   byte  4  : bits 7-5 = SPN bits 18-16 ; bits 4-0 = FMI
@@ -247,14 +258,14 @@ def decode_dm1(data: List[int]) -> Dict[str, Any]:
 
     Returns:
         Dict with keys:
-        • 'lamps'  — dict of lamp names → status strings
+        • 'lamps'  — dict of lamp names → status strings ("Off", "On", "Flash")
         • 'dtcs'   — list of dicts, each with 'spn', 'fmi', 'fmi_desc'
     """
     result: Dict[str, Any] = {
         'lamps': {
-            'red_stop':        'Off',
+            'check_engine':    'Off',
             'amber_warning':   'Off',
-            'protect':         'Off',
+            'red_stop':        'Off',
             'aftertreatment':  'Off',
         },
         'dtcs': [],
@@ -263,12 +274,25 @@ def decode_dm1(data: List[int]) -> Dict[str, Any]:
     if not data:
         return result
 
-    # --- Lamp status (byte 0) ---
-    lamp_byte = data[0]
-    result['lamps']['red_stop']       = _lamp_status(lamp_byte, 0)
-    result['lamps']['amber_warning']  = _lamp_status(lamp_byte, 2)
-    result['lamps']['protect']        = _lamp_status(lamp_byte, 4)
-    result['lamps']['aftertreatment'] = _lamp_status(lamp_byte, 6)
+    # --- Lamp on/off status (byte 0) + flash status (byte 1) ---
+    lamp_byte  = data[0]
+    flash_byte = data[1] if len(data) > 1 else 0x00
+
+    # Bit layout: bits 0-1 = check_engine, 2-3 = amber_warning,
+    #             4-5 = red_stop,           6-7 = aftertreatment
+    for key, shift in (
+        ('check_engine',   0),
+        ('amber_warning',  2),
+        ('red_stop',       4),
+        ('aftertreatment', 6),
+    ):
+        is_on    = _lamp_on(lamp_byte,  shift)
+        is_flash = _lamp_on(flash_byte, shift)
+        if is_on and is_flash:
+            result['lamps'][key] = 'Flash'
+        elif is_on:
+            result['lamps'][key] = 'On'
+        # else remains 'Off'
 
     # --- First DTC at bytes 2-4 (need at least 5 bytes total) ---
     idx = 2
