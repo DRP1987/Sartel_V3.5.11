@@ -100,6 +100,16 @@ class MonitoringScreen(QWidget):
         # Per-source DM1 data: {source_addr: decoded_dict} - keyed by SA (0x00-0xFF)
         self.dm1_data_by_source: Dict[int, dict] = {}
 
+        # DM1 lamp flash support: tracks which lamps are in "Flash" state and the
+        # current on/off toggle so the icon alternates every 500 ms.
+        self.dm1_flashing_lamps: Set[str] = set()
+        self.dm1_flash_state: bool = False  # True = lamp colour shown, False = off colour
+
+        # 500 ms flash timer — only started when at least one lamp is flashing
+        self.dm1_flash_timer = QTimer()
+        self.dm1_flash_timer.setInterval(500)
+        self.dm1_flash_timer.timeout.connect(self._tick_flash_lamps)
+
         # Timer for batched GUI updates (60 FPS = smooth, no latency)
         self.display_update_timer = QTimer()
         self.display_update_timer.timeout.connect(self._batch_update_table)
@@ -588,19 +598,36 @@ class MonitoringScreen(QWidget):
                 if key in agg_lamps and _LAMP_PRIORITY.get(status, -1) > _LAMP_PRIORITY.get(agg_lamps[key], 0):
                     agg_lamps[key] = status
 
+        # Update lamp cards; collect which lamps need to flash
+        new_flashing: Set[str] = set()
         for key, widgets in self.dm1_lamp_labels.items():
             status_str = agg_lamps.get(key, 'Off')
             is_active = status_str != 'Off'
-            bg_color = widgets['on_color'] if is_active else widgets['off_color']
-            text_color = '#ffffff' if is_active else '#6c757d'
+            widgets['status_lbl'].setText(status_str)
+            if status_str == 'Flash':
+                # Flashing lamps are driven by the timer; set initial on-state here
+                new_flashing.add(key)
+                bg_color = widgets['on_color']
+                text_color = '#ffffff'
+            else:
+                bg_color = widgets['on_color'] if is_active else widgets['off_color']
+                text_color = '#ffffff' if is_active else '#6c757d'
             widgets['card'].setStyleSheet(
                 f"QFrame {{ background-color: {bg_color}; border: 1px solid #ced4da; "
                 f"border-radius: 6px; }}"
             )
-            widgets['status_lbl'].setText(status_str)
             widgets['status_lbl'].setStyleSheet(
                 f"font-size: 13pt; font-weight: bold; color: {text_color};"
             )
+
+        # Start or stop the flash timer depending on whether any lamp is flashing
+        self.dm1_flashing_lamps = new_flashing
+        if new_flashing and not self.dm1_flash_timer.isActive():
+            self.dm1_flash_state = True  # start with lamp colour visible
+            self.dm1_flash_timer.start()
+        elif not new_flashing and self.dm1_flash_timer.isActive():
+            self.dm1_flash_timer.stop()
+            self.dm1_flash_state = False
 
         # --- Rebuild DTC table from all sources ---
         self.dm1_dtc_table.setRowCount(0)
@@ -634,6 +661,31 @@ class MonitoringScreen(QWidget):
                 self.dm1_dtc_table.setItem(row, 3, QTableWidgetItem(dtc['fmi_desc']))
                 self.dm1_dtc_table.setItem(row, 4, QTableWidgetItem(dtc.get('error_desc', 'Unknown')))
 
+    def _tick_flash_lamps(self) -> None:
+        """Toggle the background colour of all currently-flashing DM1 lamps.
+
+        Called every 500 ms by dm1_flash_timer.  Each call flips dm1_flash_state
+        and then applies either the lamp's on_color (flash phase = on) or its
+        off_color (flash phase = off) so the icon blinks at a 0.5 s duty cycle.
+        """
+        self.dm1_flash_state = not self.dm1_flash_state
+        for key in self.dm1_flashing_lamps:
+            widgets = self.dm1_lamp_labels.get(key)
+            if widgets is None:
+                continue
+            if self.dm1_flash_state:
+                bg = widgets['on_color']
+                text_color = '#ffffff'
+            else:
+                bg = widgets['off_color']
+                text_color = '#6c757d'
+            widgets['card'].setStyleSheet(
+                f"QFrame {{ background-color: {bg}; border: 1px solid #ced4da; "
+                f"border-radius: 6px; }}"
+            )
+            widgets['status_lbl'].setStyleSheet(
+                f"font-size: 13pt; font-weight: bold; color: {text_color};"
+            )
 
     def _create_filter_panel(self) -> QWidget:
         """Create CAN ID filter panel with search bar and checkboxes."""
