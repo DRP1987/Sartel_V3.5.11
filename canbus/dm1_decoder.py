@@ -300,14 +300,16 @@ def decode_dm1(data: List[int]) -> Dict[str, Any]:
         spn_byte0 = data[idx]
         spn_byte1 = data[idx + 1]
         fmi_byte  = data[idx + 2]
-        spn = spn_byte0 | (spn_byte1 << 8) | ((fmi_byte >> 5) << 16)
-        fmi = fmi_byte & 0x1F
-        result['dtcs'].append({
-            'spn':        spn,
-            'fmi':        fmi,
-            'fmi_desc':   FMI_DESCRIPTIONS.get(fmi, f'FMI {fmi}'),
-            'error_desc': get_dtc_description(spn, fmi),
-        })
+        # Skip DTC entry when all three bytes are 0x00 (no DTC data present)
+        if spn_byte0 != 0x00 or spn_byte1 != 0x00 or fmi_byte != 0x00:
+            spn = spn_byte0 | (spn_byte1 << 8) | ((fmi_byte >> 5) << 16)
+            fmi = fmi_byte & 0x1F
+            result['dtcs'].append({
+                'spn':        spn,
+                'fmi':        fmi,
+                'fmi_desc':   FMI_DESCRIPTIONS.get(fmi, f'FMI {fmi}'),
+                'error_desc': get_dtc_description(spn, fmi),
+            })
         idx += 3  # advance past first DTC
 
     # --- Additional DTCs: 5-byte groups [2 lamp bytes, 2 SPN bytes, 1 FMI byte] ---
@@ -316,14 +318,16 @@ def decode_dm1(data: List[int]) -> Dict[str, Any]:
         spn_byte0 = data[idx + 2]
         spn_byte1 = data[idx + 3]
         fmi_byte  = data[idx + 4]
-        spn = spn_byte0 | (spn_byte1 << 8) | ((fmi_byte >> 5) << 16)
-        fmi = fmi_byte & 0x1F
-        result['dtcs'].append({
-            'spn':        spn,
-            'fmi':        fmi,
-            'fmi_desc':   FMI_DESCRIPTIONS.get(fmi, f'FMI {fmi}'),
-            'error_desc': get_dtc_description(spn, fmi),
-        })
+        # Skip DTC entry when all three bytes are 0x00 (no DTC data present)
+        if spn_byte0 != 0x00 or spn_byte1 != 0x00 or fmi_byte != 0x00:
+            spn = spn_byte0 | (spn_byte1 << 8) | ((fmi_byte >> 5) << 16)
+            fmi = fmi_byte & 0x1F
+            result['dtcs'].append({
+                'spn':        spn,
+                'fmi':        fmi,
+                'fmi_desc':   FMI_DESCRIPTIONS.get(fmi, f'FMI {fmi}'),
+                'error_desc': get_dtc_description(spn, fmi),
+            })
         idx += 5
 
     return result
