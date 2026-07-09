@@ -301,7 +301,7 @@ def decode_dm1(data: List[int]) -> Dict[str, Any]:
         spn_byte1 = data[idx + 1]
         fmi_byte  = data[idx + 2]
         # Skip DTC entry when all three bytes are 0x00 (no DTC data present)
-        if spn_byte0 != 0x00 or spn_byte1 != 0x00 or fmi_byte != 0x00:
+        if spn_byte0 or spn_byte1 or fmi_byte:
             spn = spn_byte0 | (spn_byte1 << 8) | ((fmi_byte >> 5) << 16)
             fmi = fmi_byte & 0x1F
             result['dtcs'].append({
@@ -319,7 +319,7 @@ def decode_dm1(data: List[int]) -> Dict[str, Any]:
         spn_byte1 = data[idx + 3]
         fmi_byte  = data[idx + 4]
         # Skip DTC entry when all three bytes are 0x00 (no DTC data present)
-        if spn_byte0 != 0x00 or spn_byte1 != 0x00 or fmi_byte != 0x00:
+        if spn_byte0 or spn_byte1 or fmi_byte:
             spn = spn_byte0 | (spn_byte1 << 8) | ((fmi_byte >> 5) << 16)
             fmi = fmi_byte & 0x1F
             result['dtcs'].append({
