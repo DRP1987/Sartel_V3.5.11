@@ -3,6 +3,17 @@
     {
       "name": "LWE.FMS.2020 (Engine-Upper and LMB override status)",
       "info_pdf": "config/docs/FMS_Liebherr.pdf",
+      "matched_crane_models": [
+        "Liebherr LTM 1030-2.1",
+        "Liebherr LTM 1040-2.1",
+        "Liebherr LTM 1050-3.1",
+        "Liebherr LTM 1060-3.1",
+        "Liebherr LTM 1070-4.1",
+        "Liebherr LTM 1090-4.2",
+        "Liebherr LTM 1100-4.2",
+        "Liebherr LTM 1100-5.2",
+        "Liebherr LTM 1130-5.1"
+      ],
       "signals": [
         {
           "name": "Engine On_RPM<200",
@@ -159,6 +170,15 @@
     {
       "name": "Demag_2012_Std J1939(Double engine crane_Engine 1 status)",
       "info_pdf": "config/docs/AC3.055_J1939.pdf",
+      "matched_crane_models": [
+        "Demag AC 100-4",
+        "Demag AC 160-5",
+        "Demag AC 200-1",
+        "Demag AC 250-5",
+        "Demag AC 300-6",
+        "Demag AC 350-6",
+        "Demag AC 500-2"
+      ],
       "signals": [
         {
           "name": "Engine On_RPM<200",
@@ -277,6 +297,12 @@
     {
       "name": "Equipment<2014(Double engine crane_Engine 1 status)",
       "info_pdf": "config/docs/AC3.055_J1939.pdf",
+      "matched_crane_models": [
+        "Demag AC 100-4 (pre-2014)",
+        "Demag AC 160-5 (pre-2014)",
+        "Demag AC 200-1 (pre-2014)",
+        "Demag AC 250-5 (pre-2014)"
+      ],
       "signals": [
         {
           "name": "Engine On_RPM<200",
@@ -291,6 +317,16 @@
     {
       "name": "Tadano_2020 (Engine + Upper status)",
       "info_pdf": "config/docs/AC3.055_J1939.pdf",
+      "matched_crane_models": [
+        "Tadano ATF 70G-4",
+        "Tadano ATF 80G-4",
+        "Tadano ATF 100G-4",
+        "Tadano ATF 130G-5",
+        "Tadano ATF 160G-5",
+        "Tadano ATF 200G-5",
+        "Tadano GR-1000XL-3",
+        "Tadano GR-1200XL"
+      ],
       "signals": [
         {
           "name": "Engine On_RPM<200",
@@ -314,6 +350,12 @@
     {
       "name": "Tadano_2018_SCANIA (Engine + Upper status)",
       "info_pdf": "config/docs/AC3.055_J1939.pdf",
+      "matched_crane_models": [
+        "Tadano ATF 70G-4 (Scania engine)",
+        "Tadano ATF 80G-4 (Scania engine)",
+        "Tadano ATF 100G-4 (Scania engine)",
+        "Tadano ATF 130G-5 (Scania engine)"
+      ],
       "signals": [
         {
           "name": "Engine On_RPM<200",
@@ -337,6 +379,15 @@
     {
       "name": "GMK_CCS_2022 (Engine + upper status)",
       "info_pdf": "config/docs/Grove_CCS_Power board can connection.pdf",
+      "matched_crane_models": [
+        "Grove GMK 3060",
+        "Grove GMK 4100L-1",
+        "Grove GMK 5130-2",
+        "Grove GMK 5150L",
+        "Grove GMK 5165-2",
+        "Grove GMK 6300L",
+        "Grove GMK 6400"
+      ],
       "signals": [
         {
           "name": "Engine On_RPM<200",
@@ -360,6 +411,14 @@
     {
       "name": "GMK_CCS_2018 (Engine + upper status)",
       "info_pdf": "config/docs/Grove_CCS_2018_LMB+Engine.pdf",
+      "matched_crane_models": [
+        "Grove GMK 2035",
+        "Grove GMK 3060",
+        "Grove GMK 4100",
+        "Grove GMK 5130",
+        "Grove GMK 5150",
+        "Grove GMK 6300"
+      ],
       "signals": [
         {
           "name": "Engine On_RPM<200",
@@ -383,6 +442,12 @@
     {
       "name": "GMK_ECOS_2006_Ex. GMK4080-1 (Engine + upper status)",
       "info_pdf": "config/docs/Grove_ECOS_ADM2_Engine+PTO.pdf",
+      "matched_crane_models": [
+        "Grove GMK 4080-1",
+        "Grove GMK 5095",
+        "Grove GMK 5100",
+        "Grove GMK 5120"
+      ],
       "signals": [
         {
           "name": "Engine On_RPM<200",
@@ -406,6 +471,20 @@
     {
       "name": "GMK_CCS_2018 to 2025 (LMB override status)",
       "info_pdf": "config/docs/Grove_CCS_Power board can connection.pdf",
+      "matched_crane_models": [
+        "Grove GMK 2035",
+        "Grove GMK 3060",
+        "Grove GMK 4100",
+        "Grove GMK 4100L-1",
+        "Grove GMK 5130",
+        "Grove GMK 5130-2",
+        "Grove GMK 5150",
+        "Grove GMK 5150L",
+        "Grove GMK 5165-2",
+        "Grove GMK 6300",
+        "Grove GMK 6300L",
+        "Grove GMK 6400"
+      ],
       "signals": [
         {
           "name": "LMB override",
