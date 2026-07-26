@@ -6,7 +6,8 @@ import platform
 import subprocess
 from functools import partial
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-                             QLabel, QListWidget, QListWidgetItem, QMessageBox)
+                             QLabel, QListWidget, QListWidgetItem, QMessageBox,
+                             QDialog, QDialogButtonBox)
 from PyQt5.QtCore import Qt, pyqtSignal
 from config.config_loader import ConfigurationLoader
 from config.app_config import APP_NAME
@@ -140,6 +141,26 @@ class ConfigSelectionScreen(QWidget):
                 item_layout.addWidget(name_label)
                 item_layout.addStretch()
                 
+                # Add matched crane models button if data exists
+                crane_models = config.get('matched_crane_models')
+                if crane_models:
+                    crane_button = QPushButton("🏗️")
+                    crane_button.setFixedSize(30, 30)
+                    crane_button.setToolTip("Matched crane models")
+                    crane_button.setStyleSheet("""
+                        QPushButton {
+                            font-size: 16px;
+                            border: 1px solid #ccc;
+                            border-radius: 15px;
+                            background-color: #f0f0f0;
+                        }
+                        QPushButton:hover {
+                            background-color: #e0e0e0;
+                        }
+                    """)
+                    crane_button.clicked.connect(partial(self._show_matched_crane_models, idx))
+                    item_layout.addWidget(crane_button)
+
                 # Add info button if PDF documentation exists
                 info_pdf = config.get('info_pdf')
                 if info_pdf:
@@ -189,6 +210,40 @@ class ConfigSelectionScreen(QWidget):
                 "Error",
                 f"Failed to load configurations:\n{str(e)}"
             )
+
+    def _show_matched_crane_models(self, config_index):
+        """Show a dialog listing matched crane models for the given configuration."""
+        if config_index < 0 or config_index >= len(self.configurations):
+            return
+
+        config = self.configurations[config_index]
+        crane_models = config.get('matched_crane_models', [])
+        config_name = config.get('name', 'Unnamed')
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Matched Crane Models")
+        dialog.setMinimumWidth(350)
+
+        layout = QVBoxLayout(dialog)
+
+        header = QLabel(f"<b>{config_name}</b>")
+        header.setWordWrap(True)
+        header.setStyleSheet("margin-bottom: 8px;")
+        layout.addWidget(header)
+
+        if crane_models:
+            model_list = QListWidget()
+            for model in crane_models:
+                model_list.addItem(model)
+            layout.addWidget(model_list)
+        else:
+            layout.addWidget(QLabel("No matched crane models defined for this configuration."))
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Close)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        dialog.exec_()
 
     def _open_pdf_documentation(self, config_index):
         """Open PDF documentation directly (no encryption)."""
