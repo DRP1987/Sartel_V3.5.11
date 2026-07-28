@@ -1,151 +1,112 @@
 """Installation sheet dialog for filling and exporting installation data."""
 
+import json
 import os
 import sys
 import shutil
 import tempfile
 from datetime import date
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QScrollArea,
-    QWidget, QPushButton, QLabel, QLineEdit, QTextEdit, QFileDialog,
-    QMessageBox, QGroupBox, QGridLayout, QSizePolicy, QFrame
+    QCheckBox, QComboBox, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
+    QScrollArea, QWidget, QPushButton, QLabel, QLineEdit, QTextEdit,
+    QFileDialog, QMessageBox, QGroupBox, QGridLayout, QSizePolicy, QFrame,
+    QDialogButtonBox,
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 
 
 # ---------------------------------------------------------------------------
-# Field definitions: (label, excel_cell, multiline)
+# Helpers: locate the config folder
 # ---------------------------------------------------------------------------
-INSTALLATION_FIELDS: List[tuple] = [
-    ("Client / Company Name",   "B21", False),
-    ("Site / Project Name",     "B22", False),
-    ("Installation Date",       "B23", False),
-    ("Technician Name",         "B24", False),
-    ("Vehicle Type / Model",    "B25", False),
-    ("Vehicle Serial Number",   "B26", False),
-    ("Engine Type",             "B27", False),
-    ("CAN Channel",             "B28", False),
-    ("Baud Rate (bps)",         "B29", False),
-    ("Software Version",        "B30", False),
-    ("Configuration Profile",   "B31", False),
-    ("Notes / Comments",        "B32", True),
-]
 
-# Path to the bundled Excel template (relative to project root)
-_TEMPLATE_FILENAME = "installation_sheet_template.xlsx"
-
-
-def _template_path() -> str:
-    """Return the absolute path to the Excel template, searching sensible locations."""
+def _config_dir() -> str:
+    """Return the absolute path to the config directory."""
     candidates = [
-        os.path.join(os.path.dirname(__file__), "..", "assets", _TEMPLATE_FILENAME),
-        os.path.join(os.path.dirname(__file__), "..", _TEMPLATE_FILENAME),
-        os.path.join(getattr(sys, "_MEIPASS", ""), "assets", _TEMPLATE_FILENAME),
+        os.path.join(os.path.dirname(__file__), "..", "config"),
+        os.path.join(getattr(sys, "_MEIPASS", ""), "config"),
     ]
     for p in candidates:
-        if os.path.isfile(p):
+        if os.path.isdir(p):
             return os.path.abspath(p)
-    # If not found, return the expected location (it will be created on first use)
-    return os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "assets", _TEMPLATE_FILENAME)
-    )
+    # fallback – sibling of gui package
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "config"))
 
 
-def _create_template(path: str) -> None:
-    """Create the Excel template at *path* if it does not exist yet."""
+def _sheets_config_path() -> str:
+    """Return the path to installation_sheets.json inside config/."""
+    return os.path.join(_config_dir(), "installation_sheets.json")
+
+
+def _load_sheets_config() -> List[Dict[str, Any]]:
+    """Load and return the list of sheet definitions from installation_sheets.json."""
+    path = _sheets_config_path()
+    if not os.path.isfile(path):
+        return []
     try:
-        import openpyxl
-        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-        from openpyxl.utils import get_column_letter
-    except ImportError:
-        return  # silently skip — will surface properly in _fill_excel
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data.get("sheets", [])
+    except Exception:
+        return []
 
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Installation Sheet"
 
-    # ----- Column widths -----
-    ws.column_dimensions["A"].width = 28
-    ws.column_dimensions["B"].width = 45
+def _excel_template_path(filename: str) -> str:
+    """Return the absolute path for a template Excel file stored in config/."""
+    return os.path.join(_config_dir(), filename)
 
-    # ----- Title rows (1-18 reserved for header / logo) -----
-    ws.merge_cells("A1:B1")
-    title_cell = ws["A1"]
-    title_cell.value = "SARTEL – Installation Sheet"
-    title_cell.font = Font(name="Calibri", bold=True, size=16, color="FFFFFF")
-    title_cell.alignment = Alignment(horizontal="center", vertical="center")
-    title_cell.fill = PatternFill("solid", fgColor="1F497D")
-    ws.row_dimensions[1].height = 36
 
-    ws.merge_cells("A2:B2")
-    sub_cell = ws["A2"]
-    sub_cell.value = "CAN Bus Monitoring – Field Installation Record"
-    sub_cell.font = Font(name="Calibri", italic=True, size=11, color="1F497D")
-    sub_cell.alignment = Alignment(horizontal="center", vertical="center")
-    sub_cell.fill = PatternFill("solid", fgColor="DCE6F1")
-    ws.row_dimensions[2].height = 20
+# ---------------------------------------------------------------------------
+# Sheet-selection dialog (shown before the form)
+# ---------------------------------------------------------------------------
 
-    # Spacer rows 3-19
-    for r in range(3, 20):
-        ws.row_dimensions[r].height = 5
+class _SheetSelectionDialog(QDialog):
+    """Small dialog that lets the user pick which installation sheet to fill."""
 
-    # ----- Column headers (row 20) -----
-    thin = Side(style="thin", color="4472C4")
-    header_border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    for col_letter, text in (("A", "Field"), ("B", "Value")):
-        cell = ws[f"{col_letter}20"]
-        cell.value = text
-        cell.font = Font(name="Calibri", bold=True, size=11, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor="4472C4")
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        cell.border = header_border
-    ws.row_dimensions[20].height = 20
+    def __init__(self, sheet_names: List[str], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Installation Sheet")
+        self.setMinimumWidth(380)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
 
-    # ----- Data rows (21-32) -----
-    data_border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    even_fill = PatternFill("solid", fgColor="DCE6F1")
-    odd_fill = PatternFill("solid", fgColor="FFFFFF")
+        layout = QVBoxLayout()
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
 
-    for idx, (label, cell_ref, multiline) in enumerate(INSTALLATION_FIELDS):
-        row = 21 + idx
-        # Label column
-        lbl_cell = ws[f"A{row}"]
-        lbl_cell.value = label
-        lbl_cell.font = Font(name="Calibri", bold=True, size=10)
-        lbl_cell.alignment = Alignment(horizontal="left", vertical="center")
-        lbl_cell.fill = even_fill if idx % 2 == 0 else odd_fill
-        lbl_cell.border = data_border
+        lbl = QLabel("Please select the installation sheet type:")
+        lbl.setStyleSheet("font-size: 10pt; font-weight: bold;")
+        layout.addWidget(lbl)
 
-        # Value column (pre-fill empty)
-        val_cell = ws[f"B{row}"]
-        val_cell.value = ""
-        val_cell.font = Font(name="Calibri", size=10)
-        val_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-        val_cell.fill = even_fill if idx % 2 == 0 else odd_fill
-        val_cell.border = data_border
-        if multiline:
-            ws.row_dimensions[row].height = 60
-        else:
-            ws.row_dimensions[row].height = 18
+        self.combo = QComboBox()
+        self.combo.addItems(sheet_names)
+        self.combo.setMinimumHeight(32)
+        layout.addWidget(self.combo)
 
-    # Row 33 — pictures label
-    ws.merge_cells("A33:B33")
-    pic_cell = ws["A33"]
-    pic_cell.value = "Attached Pictures"
-    pic_cell.font = Font(name="Calibri", bold=True, size=11, color="FFFFFF")
-    pic_cell.alignment = Alignment(horizontal="center", vertical="center")
-    pic_cell.fill = PatternFill("solid", fgColor="4472C4")
-    ws.row_dimensions[33].height = 20
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
 
-    wb.save(path)
+        self.setLayout(layout)
 
+    @property
+    def selected_index(self) -> int:
+        return self.combo.currentIndex()
+
+
+# ---------------------------------------------------------------------------
+# Main dialog
+# ---------------------------------------------------------------------------
 
 class InstallationSheetDialog(QDialog):
-    """Pop-up dialog for filling and exporting the installation sheet."""
+    """Pop-up dialog for filling and exporting the installation sheet.
+
+    Opens a sheet-selection dropdown first, then renders a dynamic form whose
+    fields (text, multiline, or checkbox) and Excel cell mappings are driven by
+    ``config/installation_sheets.json``.
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -154,26 +115,58 @@ class InstallationSheetDialog(QDialog):
         self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint)
 
         self._uploaded_pictures: List[str] = []
-        self._field_widgets: Dict[str, QWidget] = {}  # cell_ref -> widget
+        self._field_widgets: Dict[str, QWidget] = {}   # cell_ref -> widget
+        self._current_sheet_def: Optional[Dict[str, Any]] = None
 
-        # Ensure template exists
-        tpl = _template_path()
-        if not os.path.isfile(tpl):
-            _create_template(tpl)
+        # Load available sheet definitions
+        self._sheets = _load_sheets_config()
 
+        # Ask the user which sheet to use *before* building the form
+        if not self._select_sheet():
+            # User cancelled selection – close dialog immediately
+            self._cancelled = True
+            return
+        self._cancelled = False
         self._init_ui()
+
+    # ------------------------------------------------------------------
+    # Sheet selection
+    # ------------------------------------------------------------------
+
+    def _select_sheet(self) -> bool:
+        """Show the sheet-selection dialog.  Returns True if accepted."""
+        if not self._sheets:
+            QMessageBox.warning(
+                self,
+                "No Sheet Definitions",
+                "No installation sheet definitions were found.\n"
+                f"Please check: {_sheets_config_path()}",
+            )
+            return False
+
+        names = [s.get("name", s.get("id", f"Sheet {i}")) for i, s in enumerate(self._sheets)]
+        dlg = _SheetSelectionDialog(names, parent=self)
+        if dlg.exec_() != QDialog.Accepted:
+            return False
+
+        self._current_sheet_def = self._sheets[dlg.selected_index]
+        return True
 
     # ------------------------------------------------------------------
     # UI construction
     # ------------------------------------------------------------------
 
     def _init_ui(self):
+        sheet_def = self._current_sheet_def
+        sheet_name = sheet_def.get("name", "Installation Sheet")
+        fields: List[Dict[str, Any]] = sheet_def.get("fields", [])
+
         outer = QVBoxLayout()
         outer.setSpacing(8)
         outer.setContentsMargins(12, 12, 12, 12)
 
-        # Title label
-        title_lbl = QLabel("Installation Sheet")
+        # Title label (shows selected sheet name)
+        title_lbl = QLabel(sheet_name)
         title_lbl.setStyleSheet(
             "font-size: 15pt; font-weight: bold; color: #1F497D; padding-bottom: 4px;"
         )
@@ -191,23 +184,28 @@ class InstallationSheetDialog(QDialog):
         form_layout.setSpacing(8)
         form_layout.setContentsMargins(4, 4, 4, 4)
 
-        for label_text, cell_ref, multiline in INSTALLATION_FIELDS:
+        for field in fields:
+            label_text = field.get("label", "")
+            cell_ref = field.get("cell", "")
+            field_type = field.get("type", "text").lower()
+
             lbl = QLabel(f"{label_text}:")
             lbl.setStyleSheet("font-weight: bold; font-size: 9pt;")
             lbl.setToolTip(f"Excel cell: {cell_ref}")
 
-            if multiline:
+            if field_type == "checkbox":
+                widget = QCheckBox()
+                widget.setToolTip(f"Tick to mark '{label_text}' in Excel cell {cell_ref}")
+            elif field_type == "multiline":
                 widget = QTextEdit()
                 widget.setPlaceholderText(f"Enter {label_text.lower()} here…")
                 widget.setFixedHeight(80)
                 widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            else:
+            else:  # "text"
                 widget = QLineEdit()
                 widget.setPlaceholderText(f"Enter {label_text.lower()} here…")
-
-            # Pre-populate date field
-            if "date" in label_text.lower():
-                if isinstance(widget, QLineEdit):
+                # Pre-populate date fields
+                if "date" in label_text.lower():
                     widget.setText(date.today().strftime("%d/%m/%Y"))
 
             self._field_widgets[cell_ref] = widget
@@ -276,6 +274,12 @@ class InstallationSheetDialog(QDialog):
 
         outer.addLayout(btn_layout)
         self.setLayout(outer)
+
+    # Override exec_ so a cancelled selection closes without showing the window
+    def exec_(self):
+        if getattr(self, "_cancelled", False):
+            return QDialog.Rejected
+        return super().exec_()
 
     # ------------------------------------------------------------------
     # Slot: Add Pictures
@@ -369,12 +373,14 @@ class InstallationSheetDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _clear_all(self):
-        """Clear all text fields and uploaded pictures."""
+        """Clear all text fields, uncheck checkboxes, and remove pictures."""
         for widget in self._field_widgets.values():
             if isinstance(widget, QLineEdit):
                 widget.clear()
             elif isinstance(widget, QTextEdit):
                 widget.clear()
+            elif isinstance(widget, QCheckBox):
+                widget.setChecked(False)
         self._uploaded_pictures.clear()
         self._refresh_picture_grid()
 
@@ -415,18 +421,20 @@ class InstallationSheetDialog(QDialog):
                 f"Could not create PDF:\n{exc}",
             )
 
-    def _read_field_values(self) -> Dict[str, str]:
-        """Return a mapping of excel_cell → current text value."""
-        values: Dict[str, str] = {}
+    def _read_field_values(self) -> Dict[str, Any]:
+        """Return a mapping of excel_cell → current value (str or bool)."""
+        values: Dict[str, Any] = {}
         for cell_ref, widget in self._field_widgets.items():
             if isinstance(widget, QLineEdit):
                 values[cell_ref] = widget.text().strip()
             elif isinstance(widget, QTextEdit):
                 values[cell_ref] = widget.toPlainText().strip()
+            elif isinstance(widget, QCheckBox):
+                values[cell_ref] = widget.isChecked()
         return values
 
     def _do_create_pdf(self, pdf_path: str):
-        """Internal: fill Excel, embed pictures, export to PDF."""
+        """Internal: fill Excel template from config/, embed pictures, export to PDF."""
         try:
             import openpyxl
         except ImportError as exc:
@@ -435,12 +443,21 @@ class InstallationSheetDialog(QDialog):
                 "Install it with:  pip install openpyxl"
             ) from exc
 
-        # --- Ensure template exists ---
-        tpl = _template_path()
-        if not os.path.isfile(tpl):
-            _create_template(tpl)
-        if not os.path.isfile(tpl):
-            raise RuntimeError(f"Excel template not found: {tpl}")
+        sheet_def = self._current_sheet_def or {}
+        excel_filename = sheet_def.get("excel_file", "")
+        sheet_index = sheet_def.get("sheet_index", 0)
+
+        # --- Locate the Excel template in config/ ---
+        if excel_filename:
+            tpl = _excel_template_path(excel_filename)
+        else:
+            tpl = ""
+
+        if not tpl or not os.path.isfile(tpl):
+            raise RuntimeError(
+                f"Excel template not found in config folder: {excel_filename or '(none specified)'}\n"
+                f"Please place the file in: {_config_dir()}"
+            )
 
         # --- Fill template in a temp file ---
         tmp_dir = tempfile.mkdtemp(prefix="sartel_install_")
@@ -448,11 +465,19 @@ class InstallationSheetDialog(QDialog):
         shutil.copy2(tpl, tmp_xlsx)
 
         wb = openpyxl.load_workbook(tmp_xlsx)
-        ws = wb.active
+
+        # Select the correct worksheet by index
+        if sheet_index < len(wb.sheetnames):
+            ws = wb.worksheets[sheet_index]
+        else:
+            ws = wb.active
 
         field_values = self._read_field_values()
         for cell_ref, value in field_values.items():
-            ws[cell_ref] = value
+            if isinstance(value, bool):
+                ws[cell_ref] = value  # write as boolean (TRUE/FALSE in Excel)
+            else:
+                ws[cell_ref] = value
 
         # --- Embed pictures (if any) ---
         if self._uploaded_pictures:
@@ -460,8 +485,8 @@ class InstallationSheetDialog(QDialog):
                 from openpyxl.drawing.image import Image as XLImage
                 from openpyxl.utils import get_column_letter
 
-                pic_start_row = 34  # row below the "Attached Pictures" header
-                col = 1             # column A
+                pic_start_row = ws.max_row + 2
+                col = 1  # column A
 
                 for pic_path in self._uploaded_pictures:
                     if not os.path.isfile(pic_path):
@@ -521,7 +546,7 @@ class InstallationSheetDialog(QDialog):
         except Exception:
             pass
 
-    def _create_pdf_reportlab(self, pdf_path: str, field_values: Dict[str, str]):
+    def _create_pdf_reportlab(self, pdf_path: str, field_values: Dict[str, Any]):
         """Generate a formatted PDF using reportlab when Excel COM is not available."""
         try:
             from reportlab.lib.pagesizes import A4
@@ -540,6 +565,10 @@ class InstallationSheetDialog(QDialog):
             ) from exc
 
         styles = getSampleStyleSheet()
+        sheet_def = self._current_sheet_def or {}
+        sheet_name = sheet_def.get("name", "Installation Sheet")
+        fields: List[Dict[str, Any]] = sheet_def.get("fields", [])
+
         title_style = ParagraphStyle(
             "SheetTitle",
             parent=styles["Title"],
@@ -579,23 +608,30 @@ class InstallationSheetDialog(QDialog):
         )
         story = []
 
-        story.append(Paragraph("SARTEL – Installation Sheet", title_style))
+        story.append(Paragraph(f"SARTEL – {sheet_name}", title_style))
         story.append(Paragraph("CAN Bus Monitoring – Field Installation Record", sub_style))
         story.append(HRFlowable(width="100%", color=colors.HexColor("#4472C4"), thickness=1.5))
         story.append(Spacer(1, 8 * mm))
 
-        # Build table rows
+        # Build table rows from the dynamic field list
         table_data = [
             [
                 Paragraph("<b>Field</b>", field_label_style),
                 Paragraph("<b>Value</b>", field_label_style),
             ]
         ]
-        for label_text, cell_ref, _ in INSTALLATION_FIELDS:
-            val = field_values.get(cell_ref, "")
+        for field in fields:
+            label_text = field.get("label", "")
+            cell_ref = field.get("cell", "")
+            raw_val = field_values.get(cell_ref, "")
+            # Format booleans as ✔ / ✘
+            if isinstance(raw_val, bool):
+                display_val = "✔ Yes" if raw_val else "✘ No"
+            else:
+                display_val = str(raw_val) if raw_val else "—"
             table_data.append([
                 Paragraph(label_text, field_label_style),
-                Paragraph(val if val else "—", field_value_style),
+                Paragraph(display_val, field_value_style),
             ])
 
         page_w = A4[0] - 40 * mm

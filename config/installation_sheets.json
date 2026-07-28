@@ -1,0 +1,43 @@
+{
+  "sheets": [
+    {
+      "id": "standard",
+      "name": "Standard Installation Sheet",
+      "excel_file": "installation_sheet_standard.xlsx",
+      "sheet_index": 0,
+      "fields": [
+        {"label": "Client / Company Name",  "cell": "B21", "type": "text"},
+        {"label": "Site / Project Name",    "cell": "B22", "type": "text"},
+        {"label": "Installation Date",      "cell": "B23", "type": "text"},
+        {"label": "Technician Name",        "cell": "B24", "type": "text"},
+        {"label": "Vehicle Type / Model",   "cell": "B25", "type": "text"},
+        {"label": "Vehicle Serial Number",  "cell": "B26", "type": "text"},
+        {"label": "Engine Type",            "cell": "B27", "type": "text"},
+        {"label": "CAN Channel",            "cell": "B28", "type": "text"},
+        {"label": "Baud Rate (bps)",        "cell": "B29", "type": "text"},
+        {"label": "Software Version",       "cell": "B30", "type": "text"},
+        {"label": "Configuration Profile",  "cell": "B31", "type": "text"},
+        {"label": "Notes / Comments",       "cell": "B32", "type": "multiline"}
+      ]
+    },
+    {
+      "id": "vehicle_tracker",
+      "name": "Vehicle Tracker Installation Sheet",
+      "excel_file": "installation_sheet_vehicle_tracker.xlsx",
+      "sheet_index": 0,
+      "fields": [
+        {"label": "Client / Company Name",  "cell": "B21", "type": "text"},
+        {"label": "Installation Date",      "cell": "B22", "type": "text"},
+        {"label": "Technician Name",        "cell": "B23", "type": "text"},
+        {"label": "IMEI Number",            "cell": "AB21","type": "text"},
+        {"label": "Vehicle Registration",   "cell": "B24", "type": "text"},
+        {"label": "Vehicle Make / Model",   "cell": "B25", "type": "text"},
+        {"label": "GPS Antenna Installed",  "cell": "C30", "type": "checkbox"},
+        {"label": "CAN Bus Connected",      "cell": "C31", "type": "checkbox"},
+        {"label": "Power Supply Verified",  "cell": "C32", "type": "checkbox"},
+        {"label": "Device Tested Online",   "cell": "C33", "type": "checkbox"},
+        {"label": "Notes / Comments",       "cell": "B40", "type": "multiline"}
+      ]
+    }
+  ]
+}
