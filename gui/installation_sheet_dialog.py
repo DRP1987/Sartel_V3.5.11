@@ -58,6 +58,44 @@ def _excel_template_path(filename: str) -> str:
     return os.path.join(_config_dir(), filename)
 
 
+def _resolve_cell_ref(ws, cell_ref: str) -> str:
+    """Resolve a cell reference to a writable top-left address.
+
+    Handles two cases:
+    - Range notation: ``"C10:E12"`` → returns ``"C10"`` (top-left of the range).
+    - Single cell that belongs to a merged region in *ws*: returns the top-left
+      cell of that merged region so openpyxl writes the value correctly.
+    - Single cell outside any merge: returns *cell_ref* unchanged.
+    """
+    import re
+    from openpyxl.utils import get_column_letter, column_index_from_string
+
+    # Handle explicit range notation e.g. "C10:E12" or "c10:e12"
+    cell_ref = cell_ref.strip()
+    if ":" in cell_ref:
+        top_left = cell_ref.split(":")[0].strip().upper()
+        return top_left
+
+    # Parse the column/row indices of the single cell
+    m = re.match(r"([A-Za-z]+)(\d+)$", cell_ref)
+    if not m:
+        return cell_ref  # unrecognised format – pass through unchanged
+
+    col_letter, row_str = m.groups()
+    col_idx = column_index_from_string(col_letter.upper())
+    row_idx = int(row_str)
+
+    # Check every merged region in the worksheet
+    for merged_range in ws.merged_cells.ranges:
+        if (
+            merged_range.min_row <= row_idx <= merged_range.max_row
+            and merged_range.min_col <= col_idx <= merged_range.max_col
+        ):
+            return f"{get_column_letter(merged_range.min_col)}{merged_range.min_row}"
+
+    return cell_ref
+
+
 # ---------------------------------------------------------------------------
 # Sheet-selection dialog (shown before the form)
 # ---------------------------------------------------------------------------
@@ -189,13 +227,16 @@ class InstallationSheetDialog(QDialog):
             cell_ref = field.get("cell", "")
             field_type = field.get("type", "text").lower()
 
+            # Build a human-readable cell hint for tooltips (range or single cell)
+            cell_hint = f"Excel cell{'s' if ':' in cell_ref else ''}: {cell_ref}"
+
             lbl = QLabel(f"{label_text}:")
             lbl.setStyleSheet("font-weight: bold; font-size: 9pt;")
-            lbl.setToolTip(f"Excel cell: {cell_ref}")
+            lbl.setToolTip(cell_hint)
 
             if field_type == "checkbox":
                 widget = QCheckBox()
-                widget.setToolTip(f"Tick to mark '{label_text}' in Excel cell {cell_ref}")
+                widget.setToolTip(f"Tick to mark '{label_text}' in {cell_hint}")
             elif field_type == "multiline":
                 widget = QTextEdit()
                 widget.setPlaceholderText(f"Enter {label_text.lower()} here…")
@@ -474,34 +515,9 @@ class InstallationSheetDialog(QDialog):
 
         field_values = self._read_field_values()
         for cell_ref, value in field_values.items():
-            if isinstance(value, bool):
-                ws[cell_ref] = value  # write as boolean (TRUE/FALSE in Excel)
-            else:
-                ws[cell_ref] = value
-
-        # --- Embed pictures (if any) ---
-        if self._uploaded_pictures:
-            try:
-                from openpyxl.drawing.image import Image as XLImage
-                from openpyxl.utils import get_column_letter
-
-                pic_start_row = ws.max_row + 2
-                col = 1  # column A
-
-                for pic_path in self._uploaded_pictures:
-                    if not os.path.isfile(pic_path):
-                        continue
-                    try:
-                        xl_img = XLImage(pic_path)
-                        xl_img.width = 300
-                        xl_img.height = 200
-                        cell_addr = f"{get_column_letter(col)}{pic_start_row}"
-                        ws.add_image(xl_img, cell_addr)
-                        pic_start_row += 16   # ~200px / 12.75 px per row ≈ 16 rows
-                    except Exception:
-                        pass  # skip unreadable images
-            except ImportError:
-                pass  # openpyxl drawing support unavailable
+            # Resolve the writable cell (handles merged cells and range notation)
+            writable_ref = _resolve_cell_ref(ws, cell_ref)
+            ws[writable_ref] = value  # bool writes as TRUE/FALSE; str writes as text
 
         wb.save(tmp_xlsx)
 
@@ -509,6 +525,8 @@ class InstallationSheetDialog(QDialog):
         pdf_created = False
 
         # Attempt 1: win32com (Excel on Windows)
+        # Export the filled Excel to a temp PDF, then append picture pages (if any)
+        # as separate pages in the final PDF using reportlab + pypdf.
         if not pdf_created:
             try:
                 import win32com.client
@@ -519,15 +537,25 @@ class InstallationSheetDialog(QDialog):
                 excel.Visible = False
                 excel.DisplayAlerts = False
                 try:
+                    tmp_excel_pdf = os.path.join(tmp_dir, "excel_export.pdf")
                     wb_com = excel.Workbooks.Open(os.path.abspath(tmp_xlsx))
                     wb_com.ExportAsFixedFormat(
                         0,  # xlTypePDF
-                        os.path.abspath(pdf_path),
+                        os.path.abspath(tmp_excel_pdf),
                         1,  # xlQualityStandard
                         True,
                         False,
                     )
                     wb_com.Close(False)
+
+                    if self._uploaded_pictures:
+                        # Create a separate PDF with picture pages and merge
+                        tmp_pics_pdf = os.path.join(tmp_dir, "pictures.pdf")
+                        self._create_pictures_pdf(tmp_pics_pdf)
+                        self._merge_pdfs([tmp_excel_pdf, tmp_pics_pdf], pdf_path)
+                    else:
+                        shutil.copy2(tmp_excel_pdf, pdf_path)
+
                     pdf_created = True
                 finally:
                     excel.Quit()
@@ -545,6 +573,89 @@ class InstallationSheetDialog(QDialog):
             shutil.rmtree(tmp_dir, ignore_errors=True)
         except Exception:
             pass
+
+    def _create_pictures_pdf(self, pdf_path: str):
+        """Create a PDF containing only the uploaded pictures (one per page)."""
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.lib import colors
+        from reportlab.platypus import (
+            SimpleDocTemplate, Paragraph, Spacer, Image as RLImage,
+            HRFlowable,
+        )
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER
+
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            "PicsTitle",
+            parent=styles["Title"],
+            fontSize=14,
+            textColor=colors.HexColor("#1F497D"),
+            spaceAfter=6,
+            alignment=TA_CENTER,
+        )
+        caption_style = ParagraphStyle(
+            "PicCaption",
+            parent=styles["Normal"],
+            fontSize=8,
+            textColor=colors.grey,
+            alignment=TA_CENTER,
+        )
+
+        page_w = A4[0] - 40 * mm
+        max_w = page_w * 0.90
+        max_h = 200 * mm
+
+        doc = SimpleDocTemplate(
+            pdf_path,
+            pagesize=A4,
+            leftMargin=20 * mm,
+            rightMargin=20 * mm,
+            topMargin=20 * mm,
+            bottomMargin=20 * mm,
+        )
+        story = []
+        story.append(Paragraph("Attached Pictures", title_style))
+        story.append(HRFlowable(width="100%", color=colors.HexColor("#4472C4"), thickness=1))
+        story.append(Spacer(1, 4 * mm))
+
+        for pic_path in self._uploaded_pictures:
+            if not os.path.isfile(pic_path):
+                continue
+            try:
+                img = RLImage(pic_path)
+                scale = min(max_w / img.imageWidth, max_h / img.imageHeight, 1.0)
+                img.drawWidth = img.imageWidth * scale
+                img.drawHeight = img.imageHeight * scale
+                story.append(img)
+                story.append(Spacer(1, 4 * mm))
+                story.append(Paragraph(os.path.basename(pic_path), caption_style))
+                story.append(Spacer(1, 6 * mm))
+            except Exception:
+                pass  # skip unreadable images
+
+        doc.build(story)
+
+    def _merge_pdfs(self, input_paths: List[str], output_path: str):
+        """Merge multiple PDF files into one output file, in order."""
+        try:
+            from pypdf import PdfWriter, PdfReader
+        except ImportError as exc:
+            raise RuntimeError(
+                "The 'pypdf>=6.14.2' package is required to merge PDF files. "
+                "Install it with:  pip install 'pypdf>=6.14.2'"
+            ) from exc
+
+        writer = PdfWriter()
+        for path in input_paths:
+            if not os.path.isfile(path):
+                continue
+            reader = PdfReader(path)
+            for page in reader.pages:
+                writer.add_page(page)
+        with open(output_path, "wb") as fh:
+            writer.write(fh)
 
     def _create_pdf_reportlab(self, pdf_path: str, field_values: Dict[str, Any]):
         """Generate a formatted PDF using reportlab when Excel COM is not available."""
