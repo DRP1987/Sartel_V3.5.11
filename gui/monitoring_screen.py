@@ -12,6 +12,7 @@ from typing import Dict, Any, List, Set, Optional
 import csv
 from gui.widgets import SignalStatusWidget, ConnectionStatusWidget
 from gui.utils import create_logo_widget
+from gui.installation_sheet_dialog import InstallationSheetDialog
 from canbus.pcan_interface import PCANInterface
 from canbus.signal_matcher import SignalMatcher
 from canbus.pgn_decoder import PGNDecoder
@@ -142,10 +143,24 @@ class MonitoringScreen(QWidget):
         
         top_bar.addStretch()
         
+        # Right-side vertical stack: CAN Status + Install Sheet button
+        right_stack = QVBoxLayout()
+        right_stack.setSpacing(4)
+
         # Connection status in top right
         self.connection_status_widget = ConnectionStatusWidget()
         self.connection_status_widget.set_connected(self.connected)
-        top_bar.addWidget(self.connection_status_widget)
+        right_stack.addWidget(self.connection_status_widget, alignment=Qt.AlignRight)
+
+        # "Fill up installation sheet" button below CAN Status
+        self.install_sheet_button = QPushButton("📋  Fill up installation sheet")
+        self.install_sheet_button.setToolTip(
+            "Open the installation sheet form to record site details and export a PDF"
+        )
+        self.install_sheet_button.clicked.connect(self._open_installation_sheet)
+        right_stack.addWidget(self.install_sheet_button, alignment=Qt.AlignRight)
+
+        top_bar.addLayout(right_stack)
         
         layout.addLayout(top_bar)
 
@@ -1555,3 +1570,12 @@ class MonitoringScreen(QWidget):
         # Disconnect from CAN bus
         self.pcan_interface.disconnect()
         event.accept()
+
+    # ------------------------------------------------------------------
+    # Installation Sheet
+    # ------------------------------------------------------------------
+
+    def _open_installation_sheet(self):
+        """Open the installation sheet dialog."""
+        dialog = InstallationSheetDialog(self)
+        dialog.exec_()
