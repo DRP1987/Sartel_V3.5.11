@@ -481,9 +481,11 @@ class InstallationSheetDialog(QDialog):
         Over Cells") starting at *anchor_cell* (e.g. ``"A35"``).  Every image
         is unconditionally resized to exactly 25 cm wide × 45 cm tall so the
         output is consistent regardless of the original picture dimensions.
-        When no anchor is given the pictures are placed three rows below the
-        last populated row.  Multiple pictures are stacked vertically, each
-        starting directly below the previous one.
+        Note: images that do not share the 25:45 aspect ratio will appear
+        stretched or compressed; this is intentional to ensure a uniform size
+        in the exported PDF.  When no anchor is given the pictures are placed
+        three rows below the last populated row.  Multiple pictures are stacked
+        vertically, each starting directly below the previous one.
         """
         if not self._uploaded_pictures:
             return
@@ -507,9 +509,9 @@ class InstallationSheetDialog(QDialog):
             current_row = (ws.max_row or 0) + 3
 
         # Fixed target size: 25 cm wide × 45 cm tall at 96 DPI (1 cm ≈ 37.795 px)
-        _CM_TO_PX = 96 / 2.54
-        target_w_px = round(25 * _CM_TO_PX)   # ≈ 945 px
-        target_h_px = round(45 * _CM_TO_PX)   # ≈ 1701 px
+        CM_TO_PX = 96 / 2.54
+        target_w_px = round(25 * CM_TO_PX)   # ≈ 945 px
+        target_h_px = round(45 * CM_TO_PX)   # ≈ 1701 px
         # Approximate Excel row height in pixels (default row ≈ 15 pt ≈ 20 px at 96 DPI)
         px_per_row = 20
 
