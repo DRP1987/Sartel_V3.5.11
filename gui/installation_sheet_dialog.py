@@ -554,7 +554,8 @@ class InstallationSheetDialog(QDialog):
                 # Excel export succeeded – mark as created before handling pictures
                 pdf_created = True
             except Exception:
-                pass  # fall through to reportlab
+                # win32com/Excel not available or export failed – fall through to reportlab
+                pass
 
         # If Excel export succeeded, append picture pages then produce the final PDF.
         # This is kept outside the win32com try/except so that a failure here does
@@ -566,7 +567,9 @@ class InstallationSheetDialog(QDialog):
                     self._create_pictures_pdf(tmp_pics_pdf)
                     self._merge_pdfs([tmp_excel_pdf, tmp_pics_pdf], pdf_path)
                 except Exception:
-                    # Pictures/merge step failed – still deliver the Excel-only PDF
+                    # Picture PDF creation or merge failed (e.g. unreadable image,
+                    # missing library) – still deliver the Excel-only PDF so the
+                    # user gets a valid document rather than nothing.
                     shutil.copy2(tmp_excel_pdf, pdf_path)
             else:
                 shutil.copy2(tmp_excel_pdf, pdf_path)
