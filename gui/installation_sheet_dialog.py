@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import sys
 import shutil
 import tempfile
@@ -67,7 +68,6 @@ def _resolve_cell_ref(ws, cell_ref: str) -> str:
       cell of that merged region so openpyxl writes the value correctly.
     - Single cell outside any merge: returns *cell_ref* unchanged.
     """
-    import re
     from openpyxl.utils import get_column_letter, column_index_from_string
 
     # Handle explicit range notation e.g. "C10:E12" or "c10:e12"
@@ -488,8 +488,6 @@ class InstallationSheetDialog(QDialog):
         if not self._uploaded_pictures:
             return
 
-        import re
-
         try:
             from openpyxl.drawing.image import Image as OXLImage
         except ImportError:
@@ -532,7 +530,7 @@ class InstallationSheetDialog(QDialog):
                 # Advance the row pointer so the next picture does not overlap
                 rows_used = max(1, img.height // px_per_row) + 2
                 current_row += rows_used
-            except Exception:
+            except (IOError, OSError, ValueError):
                 continue  # skip unreadable or unsupported images
 
     def _do_create_pdf(self, pdf_path: str):
@@ -629,7 +627,10 @@ class InstallationSheetDialog(QDialog):
 
                 pdf_created = True
             except Exception:
-                # win32com/Excel not available or export failed – fall through to reportlab
+                # win32com raises pywintypes.com_error (a dynamic type only importable
+                # when pywin32 is installed) in addition to ImportError when the package
+                # is absent.  A broad catch is intentional here so that any Excel/COM
+                # failure falls through to the reportlab fallback.
                 pass
 
         # Attempt 2: reportlab fallback (when Excel / win32com is not available)
