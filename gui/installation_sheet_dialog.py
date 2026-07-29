@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QScrollArea, QWidget, QPushButton, QLabel, QLineEdit, QTextEdit,
     QFileDialog, QMessageBox, QGroupBox, QGridLayout, QSizePolicy, QFrame,
-    QDialogButtonBox,
+    QDialogButtonBox, QRadioButton,
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
@@ -94,6 +94,166 @@ def _resolve_cell_ref(ws, cell_ref: str) -> str:
             return f"{get_column_letter(merged_range.min_col)}{merged_range.min_row}"
 
     return cell_ref
+
+
+# ---------------------------------------------------------------------------
+# Conditional (Yes/No) widget
+# ---------------------------------------------------------------------------
+
+class ConditionalWidget(QWidget):
+    """A compound widget for yes/no conditional questions.
+
+    Renders two radio buttons ("Yes" / "No").  When the user selects "Yes" a
+    configurable text box appears; when "No" is selected a different text box
+    appears.  The boolean answer is written to *checkbox_cell* in the Excel
+    template; the visible text content is written to *yes_text_cell* or
+    *no_text_cell* depending on the selection.
+
+    JSON field definition example::
+
+        {
+          "label": "Is the crane control CanBus connected for LMB and Crane operation?",
+          "type": "conditional",
+          "checkbox_cell": "C34",
+          "yes_text_label": "Connection Details",
+          "yes_text_cell": "D34",
+          "no_text_label": "Reason for Non-Connection",
+          "no_text_cell": "E34"
+        }
+    """
+
+    def __init__(self, field_def: Dict[str, Any], parent=None):
+        super().__init__(parent)
+        self._checkbox_cell: str = field_def.get("checkbox_cell", "")
+        self._yes_text_cell: str = field_def.get("yes_text_cell", "")
+        self._no_text_cell: str = field_def.get("no_text_cell", "")
+        yes_label = field_def.get("yes_text_label", "Details (Yes)")
+        no_label = field_def.get("no_text_label", "Details (No)")
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        # --- Yes / No radio buttons ---
+        radio_row = QHBoxLayout()
+        radio_row.setSpacing(16)
+        self._yes_radio = QRadioButton("Yes")
+        self._no_radio = QRadioButton("No")
+        self._yes_radio.setStyleSheet("font-size: 9pt;")
+        self._no_radio.setStyleSheet("font-size: 9pt;")
+        radio_row.addWidget(self._yes_radio)
+        radio_row.addWidget(self._no_radio)
+        radio_row.addStretch()
+        layout.addLayout(radio_row)
+
+        # --- Text box shown when "Yes" is selected ---
+        self._yes_container: Optional[QWidget] = None
+        self._yes_text: Optional[QTextEdit] = None
+        if self._yes_text_cell:
+            self._yes_container = QWidget()
+            yes_inner = QVBoxLayout()
+            yes_inner.setContentsMargins(0, 2, 0, 0)
+            yes_inner.setSpacing(2)
+            yes_lbl = QLabel(f"{yes_label}:")
+            yes_lbl.setStyleSheet("font-size: 8pt; color: #1a6a2e; font-weight: bold;")
+            self._yes_text = QTextEdit()
+            self._yes_text.setPlaceholderText(yes_label)
+            self._yes_text.setFixedHeight(60)
+            self._yes_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            yes_inner.addWidget(yes_lbl)
+            yes_inner.addWidget(self._yes_text)
+            self._yes_container.setLayout(yes_inner)
+            self._yes_container.setVisible(False)
+            layout.addWidget(self._yes_container)
+
+        # --- Text box shown when "No" is selected ---
+        self._no_container: Optional[QWidget] = None
+        self._no_text: Optional[QTextEdit] = None
+        if self._no_text_cell:
+            self._no_container = QWidget()
+            no_inner = QVBoxLayout()
+            no_inner.setContentsMargins(0, 2, 0, 0)
+            no_inner.setSpacing(2)
+            no_lbl = QLabel(f"{no_label}:")
+            no_lbl.setStyleSheet("font-size: 8pt; color: #a93226; font-weight: bold;")
+            self._no_text = QTextEdit()
+            self._no_text.setPlaceholderText(no_label)
+            self._no_text.setFixedHeight(60)
+            self._no_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            no_inner.addWidget(no_lbl)
+            no_inner.addWidget(self._no_text)
+            self._no_container.setLayout(no_inner)
+            self._no_container.setVisible(False)
+            layout.addWidget(self._no_container)
+
+        self.setLayout(layout)
+
+        # Connect radio button signals
+        self._yes_radio.toggled.connect(self._on_selection_changed)
+        self._no_radio.toggled.connect(self._on_selection_changed)
+
+    # ------------------------------------------------------------------
+    # Internal slot
+    # ------------------------------------------------------------------
+
+    def _on_selection_changed(self):
+        """Show/hide the appropriate text box when the selection changes."""
+        yes_checked = self._yes_radio.isChecked()
+        no_checked = self._no_radio.isChecked()
+        if self._yes_container is not None:
+            self._yes_container.setVisible(yes_checked)
+        if self._no_container is not None:
+            self._no_container.setVisible(no_checked)
+
+    # ------------------------------------------------------------------
+    # Public helpers
+    # ------------------------------------------------------------------
+
+    def get_values(self) -> Dict[str, Any]:
+        """Return a ``{cell_ref: value}`` mapping for all configured cells.
+
+        * *checkbox_cell* → ``True`` (Yes), ``False`` (No), or omitted if
+          neither radio button has been selected.
+        * *yes_text_cell* → text content when "Yes" is selected.
+        * *no_text_cell*  → text content when "No" is selected.
+        """
+        result: Dict[str, Any] = {}
+
+        if self._yes_radio.isChecked():
+            is_yes: Optional[bool] = True
+        elif self._no_radio.isChecked():
+            is_yes = False
+        else:
+            is_yes = None
+
+        if self._checkbox_cell and is_yes is not None:
+            result[self._checkbox_cell] = is_yes
+
+        if is_yes is True and self._yes_text_cell and self._yes_text is not None:
+            result[self._yes_text_cell] = self._yes_text.toPlainText().strip()
+        elif is_yes is False and self._no_text_cell and self._no_text is not None:
+            result[self._no_text_cell] = self._no_text.toPlainText().strip()
+
+        return result
+
+    def clear(self):
+        """Reset both radio buttons and clear all text boxes."""
+        # Temporarily disable mutual exclusion to allow unchecking both
+        self._yes_radio.setAutoExclusive(False)
+        self._no_radio.setAutoExclusive(False)
+        self._yes_radio.setChecked(False)
+        self._no_radio.setChecked(False)
+        self._yes_radio.setAutoExclusive(True)
+        self._no_radio.setAutoExclusive(True)
+        if self._yes_text is not None:
+            self._yes_text.clear()
+        if self._no_text is not None:
+            self._no_text.clear()
+        # Ensure both containers are hidden
+        if self._yes_container is not None:
+            self._yes_container.setVisible(False)
+        if self._no_container is not None:
+            self._no_container.setVisible(False)
 
 
 # ---------------------------------------------------------------------------
@@ -227,11 +387,31 @@ class InstallationSheetDialog(QDialog):
             cell_ref = field.get("cell", "")
             field_type = field.get("type", "text").lower()
 
-            # Build a human-readable cell hint for tooltips (range or single cell)
-            cell_hint = f"Excel cell{'s' if ':' in cell_ref else ''}: {cell_ref}"
-
             lbl = QLabel(f"{label_text}:")
             lbl.setStyleSheet("font-weight: bold; font-size: 9pt;")
+
+            if field_type == "conditional":
+                # Conditional question: Yes/No radio buttons + conditional text boxes.
+                # The question may be long, so allow the label to word-wrap and
+                # align it to the top of the row.
+                lbl.setWordWrap(True)
+                lbl.setAlignment(Qt.AlignRight | Qt.AlignTop)
+                checkbox_cell = field.get("checkbox_cell", "")
+                cells_hint = f"Checkbox cell: {checkbox_cell}"
+                if field.get("yes_text_cell"):
+                    cells_hint += f"  |  Yes text cell: {field['yes_text_cell']}"
+                if field.get("no_text_cell"):
+                    cells_hint += f"  |  No text cell: {field['no_text_cell']}"
+                lbl.setToolTip(cells_hint)
+                widget = ConditionalWidget(field)
+                # Store using checkbox_cell as key so _read_field_values can
+                # detect and call widget.get_values()
+                self._field_widgets[checkbox_cell or cell_ref] = widget
+                form_layout.addRow(lbl, widget)
+                continue
+
+            # Build a human-readable cell hint for tooltips (range or single cell)
+            cell_hint = f"Excel cell{'s' if ':' in cell_ref else ''}: {cell_ref}"
             lbl.setToolTip(cell_hint)
 
             if field_type == "checkbox":
@@ -422,6 +602,8 @@ class InstallationSheetDialog(QDialog):
                 widget.clear()
             elif isinstance(widget, QCheckBox):
                 widget.setChecked(False)
+            elif isinstance(widget, ConditionalWidget):
+                widget.clear()
         self._uploaded_pictures.clear()
         self._refresh_picture_grid()
 
@@ -463,10 +645,18 @@ class InstallationSheetDialog(QDialog):
             )
 
     def _read_field_values(self) -> Dict[str, Any]:
-        """Return a mapping of excel_cell → current value (str or bool)."""
+        """Return a mapping of excel_cell → current value (str or bool).
+
+        For :class:`ConditionalWidget` entries the widget's own
+        :meth:`~ConditionalWidget.get_values` method is called, which may
+        contribute up to three cell mappings (checkbox_cell, yes_text_cell,
+        no_text_cell).
+        """
         values: Dict[str, Any] = {}
         for cell_ref, widget in self._field_widgets.items():
-            if isinstance(widget, QLineEdit):
+            if isinstance(widget, ConditionalWidget):
+                values.update(widget.get_values())
+            elif isinstance(widget, QLineEdit):
                 values[cell_ref] = widget.text().strip()
             elif isinstance(widget, QTextEdit):
                 values[cell_ref] = widget.toPlainText().strip()
@@ -720,13 +910,31 @@ class InstallationSheetDialog(QDialog):
         ]
         for field in fields:
             label_text = field.get("label", "")
-            cell_ref = field.get("cell", "")
-            raw_val = field_values.get(cell_ref, "")
-            # Format booleans as ✔ / ✘
-            if isinstance(raw_val, bool):
-                display_val = "✔ Yes" if raw_val else "✘ No"
+            field_type = field.get("type", "text").lower()
+
+            if field_type == "conditional":
+                # Show the boolean answer + the associated text note
+                checkbox_cell = field.get("checkbox_cell", "")
+                yes_text_cell = field.get("yes_text_cell", "")
+                no_text_cell = field.get("no_text_cell", "")
+                raw_bool = field_values.get(checkbox_cell)
+                if raw_bool is True:
+                    yes_text = field_values.get(yes_text_cell, "")
+                    display_val = f"✔ Yes" + (f" – {yes_text}" if yes_text else "")
+                elif raw_bool is False:
+                    no_text = field_values.get(no_text_cell, "")
+                    display_val = f"✘ No" + (f" – {no_text}" if no_text else "")
+                else:
+                    display_val = "—"
             else:
-                display_val = str(raw_val) if raw_val else "—"
+                cell_ref = field.get("cell", "")
+                raw_val = field_values.get(cell_ref, "")
+                # Format booleans as ✔ / ✘
+                if isinstance(raw_val, bool):
+                    display_val = "✔ Yes" if raw_val else "✘ No"
+                else:
+                    display_val = str(raw_val) if raw_val else "—"
+
             table_data.append([
                 Paragraph(label_text, field_label_style),
                 Paragraph(display_val, field_value_style),

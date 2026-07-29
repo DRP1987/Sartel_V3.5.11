@@ -18,6 +18,15 @@
         {"label": "Baud Rate (bps)",        "cell": "B29", "type": "text"},
         {"label": "Software Version",       "cell": "B30", "type": "text"},
         {"label": "Configuration Profile",  "cell": "B31", "type": "text"},
+        {
+          "label": "Is the crane control CanBus connected for LMB and Crane operation?",
+          "type": "conditional",
+          "checkbox_cell": "B33",
+          "yes_text_label": "Connection Details",
+          "yes_text_cell": "B34",
+          "no_text_label": "Reason for Non-Connection",
+          "no_text_cell": "B35"
+        },
         {"label": "Notes / Comments",       "cell": "B32", "type": "multiline"}
       ]
     },
@@ -38,6 +47,15 @@
         {"label": "CAN Bus Connected",      "cell": "C31", "type": "checkbox"},
         {"label": "Power Supply Verified",  "cell": "C32", "type": "checkbox"},
         {"label": "Device Tested Online",   "cell": "C33", "type": "checkbox"},
+        {
+          "label": "Is the crane control CanBus connected for LMB and Crane operation?",
+          "type": "conditional",
+          "checkbox_cell": "C34",
+          "yes_text_label": "Connection Details",
+          "yes_text_cell": "D34",
+          "no_text_label": "Reason for Non-Connection",
+          "no_text_cell": "E34"
+        },
         {"label": "Notes / Comments",       "cell": "B40", "type": "multiline"}
       ]
     }
