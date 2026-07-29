@@ -474,8 +474,80 @@ class InstallationSheetDialog(QDialog):
                 values[cell_ref] = widget.isChecked()
         return values
 
+    def _embed_pictures_in_excel(self, ws, anchor_cell: str = None):
+        """Embed uploaded pictures directly into the Excel worksheet.
+
+        Inserts each picture as an over-cell image (similar to Excel's
+        "Insert Picture Over Cells") starting at *anchor_cell* (e.g. ``"A35"``).
+        When no anchor is given the pictures are placed three rows below the
+        last populated row.
+
+        Requires ``Pillow`` (``pip install Pillow``) so that openpyxl can read
+        image dimensions and scale them correctly.
+        """
+        if not self._uploaded_pictures:
+            return
+
+        import re
+
+        try:
+            from openpyxl.drawing.image import Image as OXLImage
+        except ImportError:
+            return  # openpyxl image support unavailable – skip
+
+        # Determine the starting row / column for picture insertion
+        if anchor_cell:
+            m = re.match(r"([A-Za-z]+)(\d+)$", anchor_cell.strip())
+            if m:
+                start_col_letter = m.group(1).upper()
+                current_row = int(m.group(2))
+            else:
+                start_col_letter = "A"
+                current_row = (ws.max_row or 0) + 3
+        else:
+            start_col_letter = "A"
+            current_row = (ws.max_row or 0) + 3
+
+        # Target size: approx 8 cm × 6 cm at 96 dpi (1 cm ≈ 37.8 px)
+        target_w_px = 300
+        target_h_px = 225
+        # Approximate row height used to advance the anchor (Excel rows ≈ 20 px tall)
+        px_per_row = 20
+
+        for pic_path in self._uploaded_pictures:
+            if not os.path.isfile(pic_path):
+                continue
+            try:
+                img = OXLImage(pic_path)
+                # Scale proportionally to fit within the target dimensions
+                orig_w = img.width or target_w_px
+                orig_h = img.height or target_h_px
+                scale = min(target_w_px / orig_w, target_h_px / orig_h, 1.0)
+                img.width = int(orig_w * scale)
+                img.height = int(orig_h * scale)
+
+                img.anchor = f"{start_col_letter}{current_row}"
+                ws.add_image(img)
+
+                # Advance the row pointer so the next picture does not overlap
+                rows_used = max(1, img.height // px_per_row) + 2
+                current_row += rows_used
+            except Exception:
+                continue  # skip unreadable or unsupported images
+
     def _do_create_pdf(self, pdf_path: str):
-        """Internal: fill Excel template from config/, embed pictures, export to PDF."""
+        """Internal: fill Excel template from config/, embed pictures, export to PDF.
+
+        Strategy
+        --------
+        1. Copy the template to a temporary file.
+        2. Write each field value into its mapped cell using openpyxl.
+        3. Embed uploaded pictures directly into the worksheet using openpyxl
+           (simulating Excel's "Insert Picture Over Cells"), so the single
+           Excel → PDF export step captures both the data and the pictures.
+        4. Export to PDF via win32com / Excel (Windows) if available.
+        5. Fall back to reportlab when win32com is unavailable.
+        """
         try:
             import openpyxl
         except ImportError as exc:
@@ -487,6 +559,7 @@ class InstallationSheetDialog(QDialog):
         sheet_def = self._current_sheet_def or {}
         excel_filename = sheet_def.get("excel_file", "")
         sheet_index = sheet_def.get("sheet_index", 0)
+        picture_anchor = sheet_def.get("picture_anchor_cell", None)
 
         # --- Locate the Excel template in config/ ---
         if excel_filename:
@@ -519,15 +592,18 @@ class InstallationSheetDialog(QDialog):
             writable_ref = _resolve_cell_ref(ws, cell_ref)
             ws[writable_ref] = value  # bool writes as TRUE/FALSE; str writes as text
 
+        # Embed pictures directly into the worksheet so they are captured
+        # when Excel exports the sheet to PDF.
+        self._embed_pictures_in_excel(ws, anchor_cell=picture_anchor)
+
         wb.save(tmp_xlsx)
 
         # --- Export to PDF ---
         pdf_created = False
-        tmp_excel_pdf = os.path.join(tmp_dir, "excel_export.pdf")
 
         # Attempt 1: win32com (Excel on Windows)
-        # Export the filled Excel to a temp PDF, then append picture pages (if any)
-        # as separate pages in the final PDF using reportlab + pypdf.
+        # Pictures are already embedded in the xlsx, so a single export produces
+        # the final PDF with both the sheet data and the pictures.
         if not pdf_created:
             try:
                 import win32com.client
@@ -541,7 +617,7 @@ class InstallationSheetDialog(QDialog):
                     wb_com = excel.Workbooks.Open(os.path.abspath(tmp_xlsx))
                     wb_com.ExportAsFixedFormat(
                         0,  # xlTypePDF
-                        os.path.abspath(tmp_excel_pdf),
+                        os.path.abspath(pdf_path),
                         1,  # xlQualityStandard
                         True,
                         False,
@@ -551,28 +627,10 @@ class InstallationSheetDialog(QDialog):
                     excel.Quit()
                     pythoncom.CoUninitialize()
 
-                # Excel export succeeded – mark as created before handling pictures
                 pdf_created = True
             except Exception:
                 # win32com/Excel not available or export failed – fall through to reportlab
                 pass
-
-        # If Excel export succeeded, append picture pages then produce the final PDF.
-        # This is kept outside the win32com try/except so that a failure here does
-        # NOT silently fall through to the reportlab fallback.
-        if pdf_created:
-            if self._uploaded_pictures:
-                try:
-                    tmp_pics_pdf = os.path.join(tmp_dir, "pictures.pdf")
-                    self._create_pictures_pdf(tmp_pics_pdf)
-                    self._merge_pdfs([tmp_excel_pdf, tmp_pics_pdf], pdf_path)
-                except Exception:
-                    # Picture PDF creation or merge failed (e.g. unreadable image,
-                    # missing library) – still deliver the Excel-only PDF so the
-                    # user gets a valid document rather than nothing.
-                    shutil.copy2(tmp_excel_pdf, pdf_path)
-            else:
-                shutil.copy2(tmp_excel_pdf, pdf_path)
 
         # Attempt 2: reportlab fallback (when Excel / win32com is not available)
         if not pdf_created:
@@ -584,89 +642,6 @@ class InstallationSheetDialog(QDialog):
             shutil.rmtree(tmp_dir, ignore_errors=True)
         except Exception:
             pass
-
-    def _create_pictures_pdf(self, pdf_path: str):
-        """Create a PDF containing only the uploaded pictures (one per page)."""
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib.units import mm
-        from reportlab.lib import colors
-        from reportlab.platypus import (
-            SimpleDocTemplate, Paragraph, Spacer, Image as RLImage,
-            HRFlowable,
-        )
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.enums import TA_CENTER
-
-        styles = getSampleStyleSheet()
-        title_style = ParagraphStyle(
-            "PicsTitle",
-            parent=styles["Title"],
-            fontSize=14,
-            textColor=colors.HexColor("#1F497D"),
-            spaceAfter=6,
-            alignment=TA_CENTER,
-        )
-        caption_style = ParagraphStyle(
-            "PicCaption",
-            parent=styles["Normal"],
-            fontSize=8,
-            textColor=colors.grey,
-            alignment=TA_CENTER,
-        )
-
-        page_w = A4[0] - 40 * mm
-        max_w = page_w * 0.90
-        max_h = 200 * mm
-
-        doc = SimpleDocTemplate(
-            pdf_path,
-            pagesize=A4,
-            leftMargin=20 * mm,
-            rightMargin=20 * mm,
-            topMargin=20 * mm,
-            bottomMargin=20 * mm,
-        )
-        story = []
-        story.append(Paragraph("Attached Pictures", title_style))
-        story.append(HRFlowable(width="100%", color=colors.HexColor("#4472C4"), thickness=1))
-        story.append(Spacer(1, 4 * mm))
-
-        for pic_path in self._uploaded_pictures:
-            if not os.path.isfile(pic_path):
-                continue
-            try:
-                img = RLImage(pic_path)
-                scale = min(max_w / img.imageWidth, max_h / img.imageHeight, 1.0)
-                img.drawWidth = img.imageWidth * scale
-                img.drawHeight = img.imageHeight * scale
-                story.append(img)
-                story.append(Spacer(1, 4 * mm))
-                story.append(Paragraph(os.path.basename(pic_path), caption_style))
-                story.append(Spacer(1, 6 * mm))
-            except Exception:
-                pass  # skip unreadable images
-
-        doc.build(story)
-
-    def _merge_pdfs(self, input_paths: List[str], output_path: str):
-        """Merge multiple PDF files into one output file, in order."""
-        try:
-            from pypdf import PdfWriter, PdfReader
-        except ImportError as exc:
-            raise RuntimeError(
-                "The 'pypdf>=6.14.2' package is required to merge PDF files. "
-                "Install it with:  pip install 'pypdf>=6.14.2'"
-            ) from exc
-
-        writer = PdfWriter()
-        for path in input_paths:
-            if not os.path.isfile(path):
-                continue
-            reader = PdfReader(path)
-            for page in reader.pages:
-                writer.add_page(page)
-        with open(output_path, "wb") as fh:
-            writer.write(fh)
 
     def _create_pdf_reportlab(self, pdf_path: str, field_values: Dict[str, Any]):
         """Generate a formatted PDF using reportlab when Excel COM is not available."""
