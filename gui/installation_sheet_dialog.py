@@ -523,6 +523,7 @@ class InstallationSheetDialog(QDialog):
 
         # --- Export to PDF ---
         pdf_created = False
+        tmp_excel_pdf = os.path.join(tmp_dir, "excel_export.pdf")
 
         # Attempt 1: win32com (Excel on Windows)
         # Export the filled Excel to a temp PDF, then append picture pages (if any)
@@ -537,7 +538,6 @@ class InstallationSheetDialog(QDialog):
                 excel.Visible = False
                 excel.DisplayAlerts = False
                 try:
-                    tmp_excel_pdf = os.path.join(tmp_dir, "excel_export.pdf")
                     wb_com = excel.Workbooks.Open(os.path.abspath(tmp_xlsx))
                     wb_com.ExportAsFixedFormat(
                         0,  # xlTypePDF
@@ -547,23 +547,34 @@ class InstallationSheetDialog(QDialog):
                         False,
                     )
                     wb_com.Close(False)
-
-                    if self._uploaded_pictures:
-                        # Create a separate PDF with picture pages and merge
-                        tmp_pics_pdf = os.path.join(tmp_dir, "pictures.pdf")
-                        self._create_pictures_pdf(tmp_pics_pdf)
-                        self._merge_pdfs([tmp_excel_pdf, tmp_pics_pdf], pdf_path)
-                    else:
-                        shutil.copy2(tmp_excel_pdf, pdf_path)
-
-                    pdf_created = True
                 finally:
                     excel.Quit()
                     pythoncom.CoUninitialize()
-            except Exception:
-                pass  # fall through to reportlab
 
-        # Attempt 2: reportlab fallback
+                # Excel export succeeded – mark as created before handling pictures
+                pdf_created = True
+            except Exception:
+                # win32com/Excel not available or export failed – fall through to reportlab
+                pass
+
+        # If Excel export succeeded, append picture pages then produce the final PDF.
+        # This is kept outside the win32com try/except so that a failure here does
+        # NOT silently fall through to the reportlab fallback.
+        if pdf_created:
+            if self._uploaded_pictures:
+                try:
+                    tmp_pics_pdf = os.path.join(tmp_dir, "pictures.pdf")
+                    self._create_pictures_pdf(tmp_pics_pdf)
+                    self._merge_pdfs([tmp_excel_pdf, tmp_pics_pdf], pdf_path)
+                except Exception:
+                    # Picture PDF creation or merge failed (e.g. unreadable image,
+                    # missing library) – still deliver the Excel-only PDF so the
+                    # user gets a valid document rather than nothing.
+                    shutil.copy2(tmp_excel_pdf, pdf_path)
+            else:
+                shutil.copy2(tmp_excel_pdf, pdf_path)
+
+        # Attempt 2: reportlab fallback (when Excel / win32com is not available)
         if not pdf_created:
             self._create_pdf_reportlab(pdf_path, field_values)
             pdf_created = True
