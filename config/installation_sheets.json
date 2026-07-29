@@ -17,9 +17,19 @@
         {"label": "Vehicle Serial Number",  "cell": "B26", "type": "text"},
         {"label": "Engine Type",            "cell": "B27", "type": "text"},
         {"label": "CAN Channel",            "cell": "B28", "type": "text"},
-        {"label": "Baud Rate (bps)",        "cell": "B29", "type": "text"},
+        {
+          "label": "Note Baudrate",
+          "cell": "B29",
+          "type": "auto_fill",
+          "auto_source": "baudrate"
+        },
         {"label": "Software Version",       "cell": "B30", "type": "text"},
-        {"label": "Configuration Profile",  "cell": "B31", "type": "text"},
+        {
+          "label": "Note configuration selected",
+          "cell": "B31",
+          "type": "auto_fill",
+          "auto_source": "config_name"
+        },
         {
           "label": "Is the crane control CanBus connected for LMB and Crane operation?",
           "type": "conditional",
@@ -51,10 +61,55 @@
         {"label": "IMEI Number",            "cell": "AB21","type": "text"},
         {"label": "Vehicle Registration",   "cell": "B24", "type": "text"},
         {"label": "Vehicle Make / Model",   "cell": "B25", "type": "text"},
-        {"label": "GPS Antenna Installed",  "cell": "C30", "type": "checkbox"},
-        {"label": "CAN Bus Connected",      "cell": "C31", "type": "checkbox"},
-        {"label": "Power Supply Verified",  "cell": "C32", "type": "checkbox"},
-        {"label": "Device Tested Online",   "cell": "C33", "type": "checkbox"},
+        {
+          "label": "Note configuration selected",
+          "cell": "B26",
+          "type": "auto_fill",
+          "auto_source": "config_name"
+        },
+        {
+          "label": "Note Baudrate",
+          "cell": "B27",
+          "type": "auto_fill",
+          "auto_source": "baudrate"
+        },
+        {
+          "label": "Hardware Installation Checks",
+          "type": "checkbox_group",
+          "group_id": "hw_checks",
+          "options": [
+            {
+              "label": "GPS Antenna Installed",
+              "cell": "C30",
+              "sub_questions": [
+                {"label": "Antenna Location",        "cell": "D30", "type": "text"},
+                {"label": "Cable Routing Notes",     "cell": "E30", "type": "text"}
+              ]
+            },
+            {
+              "label": "CAN Bus Connected",
+              "cell": "C31",
+              "sub_questions": [
+                {"label": "Connection Type",         "cell": "D31", "type": "text"},
+                {"label": "Bus Termination (Ohms)",  "cell": "E31", "type": "text"}
+              ]
+            },
+            {
+              "label": "Power Supply Verified",
+              "cell": "C32",
+              "sub_questions": [
+                {"label": "Measured Voltage (V)",    "cell": "D32", "type": "text"}
+              ]
+            },
+            {
+              "label": "Device Tested Online",
+              "cell": "C33",
+              "sub_questions": [
+                {"label": "Test Result / Notes",     "cell": "D33", "type": "multiline"}
+              ]
+            }
+          ]
+        },
         {
           "label": "Is the crane control CanBus connected for LMB and Crane operation?",
           "type": "conditional",

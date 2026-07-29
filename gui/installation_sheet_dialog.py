@@ -300,6 +300,164 @@ class ConditionalWidget(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# Checkbox-group widget
+# ---------------------------------------------------------------------------
+
+class CheckboxGroupWidget(QWidget):
+    """A compound widget that renders a group of independent checkboxes.
+
+    Each checkbox is linked to a specific Excel cell.  When a checkbox is
+    ticked, an optional batch of sub-questions (any supported non-group field
+    types) is revealed below it.  All sub-question widgets are hidden again
+    when the checkbox is unchecked.
+
+    JSON field definition example::
+
+        {
+          "label": "Installation Checks",
+          "type": "checkbox_group",
+          "group_id": "install_checks",
+          "options": [
+            {
+              "label": "GPS Antenna Installed",
+              "cell": "C30",
+              "sub_questions": [
+                {"label": "Antenna Location",   "cell": "D30", "type": "text"},
+                {"label": "Signal Strength dB",  "cell": "E30", "type": "text"}
+              ]
+            },
+            {
+              "label": "CAN Bus Connected",
+              "cell": "C31",
+              "sub_questions": [
+                {"label": "Connection Type",     "cell": "D31", "type": "text"},
+                {"label": "Additional Notes",    "cell": "E31", "type": "multiline"}
+              ]
+            },
+            {
+              "label": "Power Supply Verified",
+              "cell": "C32"
+            },
+            {
+              "label": "Device Tested Online",
+              "cell": "C33"
+            }
+          ]
+        }
+    """
+
+    def __init__(self, field_def: Dict[str, Any], parent=None):
+        super().__init__(parent)
+        self._option_checkboxes: List[Dict[str, Any]] = []
+        # Maps cell_ref → QWidget for sub-questions
+        self._sub_widgets: Dict[str, QWidget] = {}
+
+        outer = QVBoxLayout()
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(6)
+
+        for opt in field_def.get("options", []):
+            opt_label = opt.get("label", "")
+            opt_cell = opt.get("cell", "")
+            sub_questions = opt.get("sub_questions", [])
+
+            # Container for checkbox + its sub-questions
+            opt_container = QWidget()
+            opt_layout = QVBoxLayout(opt_container)
+            opt_layout.setContentsMargins(0, 0, 0, 0)
+            opt_layout.setSpacing(2)
+
+            # The main checkbox for this option
+            cb = QCheckBox(opt_label)
+            cb.setStyleSheet("font-size: 9pt; font-weight: bold;")
+            opt_layout.addWidget(cb)
+
+            # Sub-questions (hidden until checkbox is ticked)
+            sub_container: Optional[QWidget] = None
+            if sub_questions:
+                sub_container = QWidget()
+                sub_layout = QFormLayout(sub_container)
+                sub_layout.setContentsMargins(24, 2, 0, 4)
+                sub_layout.setSpacing(4)
+                sub_layout.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                sub_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+                for sq in sub_questions:
+                    sq_label = sq.get("label", "")
+                    sq_cell = sq.get("cell", "")
+                    sq_type = sq.get("type", "text").lower()
+
+                    sq_lbl = QLabel(f"{sq_label}:")
+                    sq_lbl.setStyleSheet("font-size: 8pt; color: #1a5276;")
+
+                    if sq_type == "multiline":
+                        sq_widget: QWidget = QTextEdit()
+                        sq_widget.setPlaceholderText(f"Enter {sq_label.lower()} here…")
+                        sq_widget.setFixedHeight(60)
+                        sq_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                    else:  # "text" (default)
+                        sq_widget = QLineEdit()
+                        sq_widget.setPlaceholderText(f"Enter {sq_label.lower()} here…")
+
+                    sub_layout.addRow(sq_lbl, sq_widget)
+                    if sq_cell:
+                        self._sub_widgets[sq_cell] = sq_widget
+
+                sub_container.setVisible(False)
+                opt_layout.addWidget(sub_container)
+
+            outer.addWidget(opt_container)
+
+            entry = {
+                "cell": opt_cell,
+                "checkbox": cb,
+                "sub_container": sub_container,
+            }
+            self._option_checkboxes.append(entry)
+
+            # Connect toggle
+            cb.toggled.connect(
+                lambda checked, sc=sub_container: sc.setVisible(checked) if sc else None
+            )
+
+        self.setLayout(outer)
+
+    # ------------------------------------------------------------------
+    # Public helpers
+    # ------------------------------------------------------------------
+
+    def get_values(self) -> Dict[str, Any]:
+        """Return ``{cell_ref: bool}`` for every option checkbox plus any
+        visible sub-question cell values."""
+        result: Dict[str, Any] = {}
+        for entry in self._option_checkboxes:
+            cell = entry["cell"]
+            checked: bool = entry["checkbox"].isChecked()
+            if cell:
+                result[cell] = checked
+            # Always read sub-question values so unchecked sub-fields also
+            # contribute (they will be empty strings)
+        for cell_ref, widget in self._sub_widgets.items():
+            if isinstance(widget, QTextEdit):
+                result[cell_ref] = widget.toPlainText().strip()
+            elif isinstance(widget, QLineEdit):
+                result[cell_ref] = widget.text().strip()
+        return result
+
+    def clear(self):
+        """Uncheck all checkboxes and clear all sub-question fields."""
+        for entry in self._option_checkboxes:
+            entry["checkbox"].setChecked(False)
+            if entry["sub_container"]:
+                entry["sub_container"].setVisible(False)
+        for widget in self._sub_widgets.values():
+            if isinstance(widget, QTextEdit):
+                widget.clear()
+            elif isinstance(widget, QLineEdit):
+                widget.clear()
+
+
+# ---------------------------------------------------------------------------
 # Sheet-selection dialog (shown before the form)
 # ---------------------------------------------------------------------------
 
@@ -345,11 +503,12 @@ class InstallationSheetDialog(QDialog):
     """Pop-up dialog for filling and exporting the installation sheet.
 
     Opens a sheet-selection dropdown first, then renders a dynamic form whose
-    fields (text, multiline, or checkbox) and Excel cell mappings are driven by
-    ``config/installation_sheets.json``.
+    fields (text, multiline, checkbox, auto_fill, or checkbox_group) and Excel
+    cell mappings are driven by ``config/installation_sheets.json``.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, configuration_name: Optional[str] = None,
+                 baudrate: Optional[int] = None, is_offline: bool = False):
         super().__init__(parent)
         self.setWindowTitle("Fill up Installation Sheet")
         self.setMinimumSize(640, 700)
@@ -358,6 +517,9 @@ class InstallationSheetDialog(QDialog):
         self._uploaded_pictures: List[str] = []
         self._field_widgets: Dict[str, QWidget] = {}   # cell_ref -> widget
         self._current_sheet_def: Optional[Dict[str, Any]] = None
+        self._configuration_name: Optional[str] = configuration_name
+        self._baudrate: Optional[int] = baudrate
+        self._is_offline: bool = is_offline
 
         # Load available sheet definitions
         self._sheets = _load_sheets_config()
@@ -453,11 +615,51 @@ class InstallationSheetDialog(QDialog):
                 form_layout.addRow(lbl, widget)
                 continue
 
+            if field_type == "checkbox_group":
+                # Checkbox-group question: multiple named checkboxes each linked to
+                # an Excel cell, with optional per-checkbox sub-questions.
+                lbl.setWordWrap(True)
+                lbl.setAlignment(Qt.AlignRight | Qt.AlignTop)
+                widget = CheckboxGroupWidget(field)
+                # The group widget manages its own cell→widget mapping; register
+                # it under a sentinel key so _read_field_values can find it.
+                sentinel = field.get("group_id") or f"__cbg_{len(self._field_widgets)}"
+                self._field_widgets[sentinel] = widget
+                form_layout.addRow(lbl, widget)
+                continue
+
             # Build a human-readable cell hint for tooltips (range or single cell)
             cell_hint = f"Excel cell{'s' if ':' in cell_ref else ''}: {cell_ref}"
             lbl.setToolTip(cell_hint)
 
-            if field_type == "checkbox":
+            if field_type == "auto_fill":
+                # Auto-fill field: value is populated automatically from context.
+                # "auto_source" can be "config_name" or "baudrate".
+                auto_source = field.get("auto_source", "")
+                if auto_source == "config_name":
+                    auto_value = self._configuration_name or ""
+                    editable = not bool(auto_value)
+                elif auto_source == "baudrate":
+                    auto_value = str(self._baudrate) if self._baudrate is not None else ""
+                    # Editable when offline (no auto-detected baudrate)
+                    editable = self._is_offline and not auto_value
+                else:
+                    auto_value = ""
+                    editable = True
+                widget = QLineEdit()
+                widget.setText(auto_value)
+                widget.setReadOnly(not editable)
+                if not editable:
+                    widget.setStyleSheet(
+                        "QLineEdit { background-color: #EEF2F7; color: #444; }"
+                    )
+                    widget.setToolTip(f"Auto-filled from application context  |  {cell_hint}")
+                else:
+                    widget.setPlaceholderText(f"Enter {label_text.lower()} here…")
+                    widget.setToolTip(
+                        f"Enter manually (not available in current mode)  |  {cell_hint}"
+                    )
+            elif field_type == "checkbox":
                 widget = QCheckBox()
                 widget.setToolTip(f"Tick to mark '{label_text}' in {cell_hint}")
             elif field_type == "multiline":
@@ -640,12 +842,15 @@ class InstallationSheetDialog(QDialog):
         """Clear all text fields, uncheck checkboxes, and remove pictures."""
         for widget in self._field_widgets.values():
             if isinstance(widget, QLineEdit):
-                widget.clear()
+                if not widget.isReadOnly():
+                    widget.clear()
             elif isinstance(widget, QTextEdit):
                 widget.clear()
             elif isinstance(widget, QCheckBox):
                 widget.setChecked(False)
             elif isinstance(widget, ConditionalWidget):
+                widget.clear()
+            elif isinstance(widget, CheckboxGroupWidget):
                 widget.clear()
         self._uploaded_pictures.clear()
         self._refresh_picture_grid()
@@ -694,10 +899,16 @@ class InstallationSheetDialog(QDialog):
         :meth:`~ConditionalWidget.get_values` method is called, which may
         contribute up to three cell mappings (checkbox_cell, yes_text_cell,
         no_text_cell).
+
+        For :class:`CheckboxGroupWidget` entries the widget's own
+        :meth:`~CheckboxGroupWidget.get_values` method is called, which
+        contributes one bool per checkbox cell plus any sub-question cells.
         """
         values: Dict[str, Any] = {}
         for cell_ref, widget in self._field_widgets.items():
             if isinstance(widget, ConditionalWidget):
+                values.update(widget.get_values())
+            elif isinstance(widget, CheckboxGroupWidget):
                 values.update(widget.get_values())
             elif isinstance(widget, QLineEdit):
                 values[cell_ref] = widget.text().strip()
@@ -824,6 +1035,31 @@ class InstallationSheetDialog(QDialog):
         # "checkbox_yes_char" / "checkbox_no_char".
         checkbox_yes_char = sheet_def.get("checkbox_yes_char", "☑")
         checkbox_no_char = sheet_def.get("checkbox_no_char", "☐")
+
+        # Before writing user-provided values, pre-fill every checkbox cell
+        # defined in the JSON with the unchecked symbol.  This prevents native
+        # Excel form controls from showing "FALSE" in the PDF when the user has
+        # not interacted with a checkbox.
+        fields: List[Dict[str, Any]] = sheet_def.get("fields", [])
+        for fld in fields:
+            ftype = fld.get("type", "text").lower()
+            if ftype == "checkbox":
+                c = fld.get("cell", "")
+                if c and c not in field_values:
+                    writable = _resolve_cell_ref(ws, c)
+                    ws[writable] = checkbox_no_char
+            elif ftype == "conditional":
+                c = fld.get("checkbox_cell", "")
+                if c and c not in field_values:
+                    writable = _resolve_cell_ref(ws, c)
+                    ws[writable] = checkbox_no_char
+            elif ftype == "checkbox_group":
+                for opt in fld.get("options", []):
+                    c = opt.get("cell", "")
+                    if c and c not in field_values:
+                        writable = _resolve_cell_ref(ws, c)
+                        ws[writable] = checkbox_no_char
+
         for cell_ref, value in field_values.items():
             # Resolve the writable cell (handles merged cells and range notation)
             writable_ref = _resolve_cell_ref(ws, cell_ref)
@@ -988,6 +1224,24 @@ class InstallationSheetDialog(QDialog):
                     display_val = " – ".join(parts)
                 else:
                     display_val = "—"
+            elif field_type == "checkbox_group":
+                # Show each option as its own sub-row
+                options = field.get("options", [])
+                parts = []
+                for opt in options:
+                    opt_label = opt.get("label", "")
+                    opt_cell = opt.get("cell", "")
+                    checked = field_values.get(opt_cell, False)
+                    icon = "☑" if checked else "☐"
+                    sub_parts = [f"{icon} {opt_label}"]
+                    if checked:
+                        for sq in opt.get("sub_questions", []):
+                            sq_cell = sq.get("cell", "")
+                            sq_val = field_values.get(sq_cell, "")
+                            if sq_val:
+                                sub_parts.append(f"  {sq.get('label','')}: {sq_val}")
+                    parts.append("  ".join(sub_parts))
+                display_val = "\n".join(parts) if parts else "—"
             else:
                 cell_ref = field.get("cell", "")
                 raw_val = field_values.get(cell_ref, "")
