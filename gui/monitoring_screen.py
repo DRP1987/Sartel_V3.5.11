@@ -1577,5 +1577,11 @@ class MonitoringScreen(QWidget):
 
     def _open_installation_sheet(self):
         """Open the installation sheet dialog."""
-        dialog = InstallationSheetDialog(self)
+        config_name = self.configuration.get('name') if self.configuration else None
+        dialog = InstallationSheetDialog(
+            parent=self,
+            configuration_name=config_name,
+            baudrate=self.baudrate,
+            is_offline=not self.connected,
+        )
         dialog.exec_()
