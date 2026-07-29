@@ -6,6 +6,8 @@
       "excel_file": "installation_sheet_standard.xlsx",
       "sheet_index": 0,
       "picture_anchor_cell": "A35",
+      "checkbox_yes_char": "☑",
+      "checkbox_no_char": "☐",
       "fields": [
         {"label": "Client / Company Name",  "cell": "B21", "type": "text"},
         {"label": "Site / Project Name",    "cell": "B22", "type": "text"},
@@ -24,8 +26,12 @@
           "checkbox_cell": "B33",
           "yes_text_label": "Connection Details",
           "yes_text_cell": "B34",
+          "yes_text_label2": "Additional Notes (Yes)",
+          "yes_text_cell2": "B35",
           "no_text_label": "Reason for Non-Connection",
-          "no_text_cell": "B35"
+          "no_text_cell": "B36",
+          "no_text_label2": "Additional Notes (No)",
+          "no_text_cell2": "B37"
         },
         {"label": "Notes / Comments",       "cell": "B32", "type": "multiline"}
       ]
@@ -36,6 +42,8 @@
       "excel_file": "installation_sheet_vehicle_tracker.xlsx",
       "sheet_index": 0,
       "picture_anchor_cell": "A45",
+      "checkbox_yes_char": "☑",
+      "checkbox_no_char": "☐",
       "fields": [
         {"label": "Client / Company Name",  "cell": "B21", "type": "text"},
         {"label": "Installation Date",      "cell": "B22", "type": "text"},
@@ -53,8 +61,12 @@
           "checkbox_cell": "C34",
           "yes_text_label": "Connection Details",
           "yes_text_cell": "D34",
+          "yes_text_label2": "Additional Notes (Yes)",
+          "yes_text_cell2": "D35",
           "no_text_label": "Reason for Non-Connection",
-          "no_text_cell": "E34"
+          "no_text_cell": "E34",
+          "no_text_label2": "Additional Notes (No)",
+          "no_text_cell2": "E35"
         },
         {"label": "Notes / Comments",       "cell": "B40", "type": "multiline"}
       ]
