@@ -477,13 +477,13 @@ class InstallationSheetDialog(QDialog):
     def _embed_pictures_in_excel(self, ws, anchor_cell: str = None):
         """Embed uploaded pictures directly into the Excel worksheet.
 
-        Inserts each picture as an over-cell image (similar to Excel's
-        "Insert Picture Over Cells") starting at *anchor_cell* (e.g. ``"A35"``).
+        Inserts each picture as an over-cell image (Excel's "Insert Picture
+        Over Cells") starting at *anchor_cell* (e.g. ``"A35"``).  Every image
+        is unconditionally resized to exactly 25 cm wide × 45 cm tall so the
+        output is consistent regardless of the original picture dimensions.
         When no anchor is given the pictures are placed three rows below the
-        last populated row.
-
-        Requires ``Pillow`` (``pip install Pillow``) so that openpyxl can read
-        image dimensions and scale them correctly.
+        last populated row.  Multiple pictures are stacked vertically, each
+        starting directly below the previous one.
         """
         if not self._uploaded_pictures:
             return
@@ -506,10 +506,11 @@ class InstallationSheetDialog(QDialog):
             start_col_letter = "A"
             current_row = (ws.max_row or 0) + 3
 
-        # Target size: approx 8 cm × 6 cm at 96 dpi (1 cm ≈ 37.8 px)
-        target_w_px = 300
-        target_h_px = 225
-        # Approximate row height used to advance the anchor (Excel rows ≈ 20 px tall)
+        # Fixed target size: 25 cm wide × 45 cm tall at 96 DPI (1 cm ≈ 37.795 px)
+        _CM_TO_PX = 96 / 2.54
+        target_w_px = round(25 * _CM_TO_PX)   # ≈ 945 px
+        target_h_px = round(45 * _CM_TO_PX)   # ≈ 1701 px
+        # Approximate Excel row height in pixels (default row ≈ 15 pt ≈ 20 px at 96 DPI)
         px_per_row = 20
 
         for pic_path in self._uploaded_pictures:
@@ -517,18 +518,15 @@ class InstallationSheetDialog(QDialog):
                 continue
             try:
                 img = OXLImage(pic_path)
-                # Scale proportionally to fit within the target dimensions
-                orig_w = img.width or target_w_px
-                orig_h = img.height or target_h_px
-                scale = min(target_w_px / orig_w, target_h_px / orig_h, 1.0)
-                img.width = int(orig_w * scale)
-                img.height = int(orig_h * scale)
+                # Always force the picture to exactly 25 cm × 45 cm
+                img.width = target_w_px
+                img.height = target_h_px
 
                 img.anchor = f"{start_col_letter}{current_row}"
                 ws.add_image(img)
 
-                # Advance the row pointer so the next picture does not overlap
-                rows_used = max(1, img.height // px_per_row) + 2
+                # Advance the row pointer so the next picture starts below this one
+                rows_used = max(1, target_h_px // px_per_row) + 2
                 current_row += rows_used
             except (IOError, OSError, ValueError):
                 continue  # skip unreadable or unsupported images
