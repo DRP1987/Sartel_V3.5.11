@@ -96,6 +96,19 @@ def _resolve_cell_ref(ws, cell_ref: str) -> str:
     return cell_ref
 
 
+def _com_cell_ref(cell_ref: str) -> str:
+    """Return the cell address to use with win32com ``Range()``.
+
+    For range notation such as ``"C10:E12"`` the top-left address (``"C10"``)
+    is returned so that only the first cell in a merged region is written.
+    Single-cell references are returned unchanged (uppercased).
+    """
+    cell_ref = cell_ref.strip().upper()
+    if ":" in cell_ref:
+        return cell_ref.split(":")[0].strip()
+    return cell_ref
+
+
 # ---------------------------------------------------------------------------
 # Conditional (Yes/No) widget
 # ---------------------------------------------------------------------------
@@ -982,22 +995,22 @@ class InstallationSheetDialog(QDialog):
 
         Strategy
         --------
-        1. Copy the template to a temporary file.
-        2. Write each field value into its mapped cell using openpyxl.
-        3. Embed uploaded pictures directly into the worksheet using openpyxl
-           (simulating Excel's "Insert Picture Over Cells"), so the single
-           Excel → PDF export step captures both the data and the pictures.
-        4. Export to PDF via win32com / Excel (Windows) if available.
-        5. Fall back to reportlab when win32com is unavailable.
-        """
-        try:
-            import openpyxl
-        except ImportError as exc:
-            raise RuntimeError(
-                "The 'openpyxl' package is required. "
-                "Install it with:  pip install openpyxl"
-            ) from exc
+        Attempt 1 – win32com / Excel (Windows):
+          1. Copy the template to a temporary file.
+          2. Open the copy **directly** with Excel via win32com – no openpyxl
+             round-trip.  This preserves every native Excel feature: Form
+             Control checkboxes, coloured shapes/drawings, and cell formatting.
+          3. Write each field value into its mapped cell via ``Range.Value``.
+             Boolean checkbox values are written as ☑ / ☐ characters so that
+             unchecked checkboxes never appear as "FALSE" in the exported PDF.
+          4. Insert uploaded pictures via Excel's ``Shapes.AddPicture`` API.
+          5. Export to PDF with ``ExportAsFixedFormat``.
+          6. Close the temporary workbook without saving.
 
+        Attempt 2 – reportlab fallback (no Excel / win32com available):
+          Render a simple formatted PDF directly from the collected field values
+          using reportlab.  openpyxl is not required for this path.
+        """
         sheet_def = self._current_sheet_def or {}
         excel_filename = sheet_def.get("excel_file", "")
         sheet_index = sheet_def.get("sheet_index", 0)
@@ -1015,112 +1028,146 @@ class InstallationSheetDialog(QDialog):
                 f"Please place the file in: {_config_dir()}"
             )
 
-        # --- Fill template in a temp file ---
-        tmp_dir = tempfile.mkdtemp(prefix="sartel_install_")
-        tmp_xlsx = os.path.join(tmp_dir, "installation_sheet_filled.xlsx")
-        shutil.copy2(tpl, tmp_xlsx)
-
-        wb = openpyxl.load_workbook(tmp_xlsx)
-
-        # Select the correct worksheet by index
-        if sheet_index < len(wb.sheetnames):
-            ws = wb.worksheets[sheet_index]
-        else:
-            ws = wb.active
-
+        # Collect field values from the Qt form widgets now so both code paths
+        # can use them without repeating the work.
         field_values = self._read_field_values()
-        # Checkbox symbols written into the Excel cell so the "print to PDF"
-        # export shows icons rather than the text TRUE/FALSE.  The characters
-        # can be overridden per-sheet in installation_sheets.json via
-        # "checkbox_yes_char" / "checkbox_no_char".
+
+        # Checkbox symbols can be overridden per-sheet in installation_sheets.json.
         checkbox_yes_char = sheet_def.get("checkbox_yes_char", "☑")
         checkbox_no_char = sheet_def.get("checkbox_no_char", "☐")
-
-        # Before writing user-provided values, pre-fill every checkbox cell
-        # defined in the JSON with the unchecked symbol.  This prevents native
-        # Excel form controls from showing "FALSE" in the PDF when the user has
-        # not interacted with a checkbox.
         fields: List[Dict[str, Any]] = sheet_def.get("fields", [])
-        for fld in fields:
-            ftype = fld.get("type", "text").lower()
-            if ftype == "checkbox":
-                c = fld.get("cell", "")
-                if c and c not in field_values:
-                    writable = _resolve_cell_ref(ws, c)
-                    ws[writable] = checkbox_no_char
-            elif ftype == "conditional":
-                c = fld.get("checkbox_cell", "")
-                if c and c not in field_values:
-                    writable = _resolve_cell_ref(ws, c)
-                    ws[writable] = checkbox_no_char
-            elif ftype == "checkbox_group":
-                for opt in fld.get("options", []):
-                    c = opt.get("cell", "")
-                    if c and c not in field_values:
-                        writable = _resolve_cell_ref(ws, c)
-                        ws[writable] = checkbox_no_char
 
-        for cell_ref, value in field_values.items():
-            # Resolve the writable cell (handles merged cells and range notation)
-            writable_ref = _resolve_cell_ref(ws, cell_ref)
-            if isinstance(value, bool):
-                ws[writable_ref] = checkbox_yes_char if value else checkbox_no_char
-            else:
-                ws[writable_ref] = value
-
-        # Embed pictures directly into the worksheet so they are captured
-        # when Excel exports the sheet to PDF.
-        self._embed_pictures_in_excel(ws, anchor_cell=picture_anchor)
-
-        wb.save(tmp_xlsx)
-
-        # --- Export to PDF ---
         pdf_created = False
 
-        # Attempt 1: win32com (Excel on Windows)
-        # Pictures are already embedded in the xlsx, so a single export produces
-        # the final PDF with both the sheet data and the pictures.
+        # ------------------------------------------------------------------
+        # Attempt 1: win32com – open the template copy directly with Excel.
+        # Bypassing the openpyxl load/save cycle preserves Form Controls,
+        # coloured shapes, and all cell formatting exactly as designed.
+        # ------------------------------------------------------------------
         if not pdf_created:
             try:
                 import win32com.client
                 import pythoncom
 
-                pythoncom.CoInitialize()
-                excel = win32com.client.Dispatch("Excel.Application")
-                excel.Visible = False
-                excel.DisplayAlerts = False
-                try:
-                    wb_com = excel.Workbooks.Open(os.path.abspath(tmp_xlsx))
-                    wb_com.ExportAsFixedFormat(
-                        0,  # xlTypePDF
-                        os.path.abspath(pdf_path),
-                        1,  # xlQualityStandard
-                        True,
-                        False,
-                    )
-                    wb_com.Close(False)
-                finally:
-                    excel.Quit()
-                    pythoncom.CoUninitialize()
+                tmp_dir = tempfile.mkdtemp(prefix="sartel_install_")
+                tmp_xlsx = os.path.join(tmp_dir, "installation_sheet_filled.xlsx")
+                shutil.copy2(tpl, tmp_xlsx)
 
-                pdf_created = True
+                try:
+                    pythoncom.CoInitialize()
+                    excel = win32com.client.Dispatch("Excel.Application")
+                    excel.Visible = False
+                    excel.DisplayAlerts = False
+                    try:
+                        wb_com = excel.Workbooks.Open(os.path.abspath(tmp_xlsx))
+
+                        # COM worksheet indices are 1-based.
+                        if sheet_index < wb_com.Worksheets.Count:
+                            ws_com = wb_com.Worksheets(sheet_index + 1)
+                        else:
+                            ws_com = wb_com.ActiveSheet
+
+                        # Before writing user values, pre-fill every checkbox
+                        # cell defined in the JSON that the user left untouched
+                        # with the unchecked symbol.  This ensures that any
+                        # cell that was displaying "FALSE" from a native Form
+                        # Control link will show ☐ instead.
+                        for fld in fields:
+                            ftype = fld.get("type", "text").lower()
+                            if ftype == "checkbox":
+                                c = fld.get("cell", "")
+                                if c and c not in field_values:
+                                    ws_com.Range(_com_cell_ref(c)).Value = checkbox_no_char
+                            elif ftype == "conditional":
+                                c = fld.get("checkbox_cell", "")
+                                if c and c not in field_values:
+                                    ws_com.Range(_com_cell_ref(c)).Value = checkbox_no_char
+                            elif ftype == "checkbox_group":
+                                for opt in fld.get("options", []):
+                                    c = opt.get("cell", "")
+                                    if c and c not in field_values:
+                                        ws_com.Range(_com_cell_ref(c)).Value = checkbox_no_char
+
+                        # Write user-provided field values.
+                        for cell_ref, value in field_values.items():
+                            com_ref = _com_cell_ref(cell_ref)
+                            if isinstance(value, bool):
+                                ws_com.Range(com_ref).Value = (
+                                    checkbox_yes_char if value else checkbox_no_char
+                                )
+                            else:
+                                ws_com.Range(com_ref).Value = value
+
+                        # Insert uploaded pictures via Excel's Shapes API so
+                        # they appear at the correct position in the exported PDF.
+                        if self._uploaded_pictures:
+                            # Target picture size: 25 cm wide × 45 cm tall.
+                            # Excel COM measures positions/sizes in points
+                            # (1 pt = 1/72 inch; 1 cm ≈ 28.3465 pt).
+                            CM_TO_PT = 72.0 / 2.54
+                            pic_w = round(25 * CM_TO_PT)
+                            pic_h = round(45 * CM_TO_PT)
+
+                            # Starting position: the anchor cell when provided,
+                            # otherwise top-left of the used range plus a gap.
+                            if picture_anchor:
+                                try:
+                                    anc = ws_com.Range(_com_cell_ref(picture_anchor))
+                                    left_pos = float(anc.Left)
+                                    top_pos = float(anc.Top)
+                                except Exception:
+                                    left_pos, top_pos = 0.0, 0.0
+                            else:
+                                left_pos, top_pos = 0.0, 0.0
+
+                            for pic_path in self._uploaded_pictures:
+                                if not os.path.isfile(pic_path):
+                                    continue
+                                try:
+                                    ws_com.Shapes.AddPicture(
+                                        os.path.abspath(pic_path),
+                                        False,   # LinkToFile
+                                        True,    # SaveWithDocument
+                                        left_pos,
+                                        top_pos,
+                                        pic_w,
+                                        pic_h,
+                                    )
+                                    # Stack pictures vertically with a small gap.
+                                    top_pos += pic_h + 10
+                                except Exception:
+                                    pass  # skip unreadable / unsupported images
+
+                        wb_com.ExportAsFixedFormat(
+                            0,      # xlTypePDF
+                            os.path.abspath(pdf_path),
+                            1,      # xlQualityStandard
+                            True,
+                            False,
+                        )
+                        wb_com.Close(False)
+                        pdf_created = True
+                    finally:
+                        excel.Quit()
+                        pythoncom.CoUninitialize()
+                finally:
+                    try:
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                    except Exception:
+                        pass
             except Exception:
-                # win32com raises pywintypes.com_error (a dynamic type only importable
-                # when pywin32 is installed) in addition to ImportError when the package
-                # is absent.  A broad catch is intentional here so that any Excel/COM
-                # failure falls through to the reportlab fallback.
+                # A broad catch is intentional: win32com raises pywintypes.com_error
+                # (a dynamic type only importable when pywin32 is installed) in
+                # addition to ImportError when the package is absent.  Any failure
+                # here falls through to the reportlab fallback below.
                 pass
 
-        # Attempt 2: reportlab fallback (when Excel / win32com is not available)
+        # ------------------------------------------------------------------
+        # Attempt 2: reportlab fallback (no Excel / win32com available).
+        # ------------------------------------------------------------------
         if not pdf_created:
             self._create_pdf_reportlab(pdf_path, field_values)
-            pdf_created = True
-
-        # Clean up temp dir
-        try:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-        except Exception:
-            pass
+            pdf_created = True  # noqa: F841
 
     def _create_pdf_reportlab(self, pdf_path: str, field_values: Dict[str, Any]):
         """Generate a formatted PDF using reportlab when Excel COM is not available."""
