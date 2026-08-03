@@ -662,8 +662,25 @@ class InstallationSheetDialog(QDialog):
             label_text = field.get("label", "")
             cell_ref = field.get("cell", "")
             field_type = field.get("type", "text").lower()
+            is_required = field.get("required", False)
 
-            lbl = QLabel(f"{label_text}:")
+            if field_type == "section_title":
+                # Stand-alone title that groups the questions below it.
+                # Rendered as a full-width styled label with no associated widget.
+                section_lbl = QLabel(label_text)
+                section_lbl.setStyleSheet(
+                    "font-size: 10pt; font-weight: bold; color: #1F497D;"
+                    " border-bottom: 1px solid #1F497D; padding-bottom: 2px;"
+                    " margin-top: 6px;"
+                )
+                section_lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                form_layout.addRow(section_lbl)
+                continue
+
+            # Append " *" to the label for required fields so users can see
+            # at a glance which ones must be filled before creating the PDF.
+            display_label = f"{label_text} *:" if is_required else f"{label_text}:"
+            lbl = QLabel(display_label)
             lbl.setStyleSheet("font-weight: bold; font-size: 9pt;")
 
             if field_type == "conditional":
@@ -1034,6 +1051,43 @@ class InstallationSheetDialog(QDialog):
     # Slot: Create PDF
     # ------------------------------------------------------------------
 
+    def _validate_required_fields(self) -> List[str]:
+        """Return a list of labels for required fields that have not been filled.
+
+        Checks:
+        - ``text`` / ``multiline`` / ``auto_fill``: the mapped cell value must be
+          a non-empty string.
+        - ``conditional``: at least one of the Yes / No radio buttons must be
+          selected (i.e. ``checkbox_cell`` must be present in the collected values).
+
+        ``checkbox``, ``checkbox_group``, and ``section_title`` fields are always
+        considered valid because checkboxes inherently carry a value.
+        """
+        missing: List[str] = []
+        sheet_def = self._current_sheet_def or {}
+        fields: List[Dict[str, Any]] = sheet_def.get("fields", [])
+        field_values = self._read_field_values()
+
+        for field in fields:
+            if not field.get("required", False):
+                continue
+            label_text = field.get("label", "")
+            field_type = field.get("type", "text").lower()
+
+            if field_type in ("text", "multiline", "auto_fill"):
+                cell_ref = field.get("cell", "")
+                val = field_values.get(cell_ref, "")
+                if not str(val).strip():
+                    missing.append(label_text)
+            elif field_type == "conditional":
+                # The checkbox_cell key is only present when a radio button is
+                # selected; its absence means neither Yes nor No was chosen.
+                checkbox_cell = field.get("checkbox_cell", "")
+                if checkbox_cell not in field_values:
+                    missing.append(label_text)
+
+        return missing
+
     def _create_pdf(self):
         """
         Fill the Excel template with form data, embed pictures, then export to PDF.
@@ -1045,6 +1099,17 @@ class InstallationSheetDialog(QDialog):
           4. Try to export via win32com (Excel on Windows).
           5. Fall back to reportlab if win32com is unavailable.
         """
+        # --- Validate required fields before anything else ---
+        missing = self._validate_required_fields()
+        if missing:
+            QMessageBox.warning(
+                self,
+                "Required Fields Missing",
+                "Please fill in the following required fields before creating the PDF:\n\n"
+                + "\n".join(f"  \u2022 {m}" for m in missing),
+            )
+            return
+
         # --- Ask where to save the PDF ---
         default_name = "installation_sheet.pdf"
         pdf_path, _ = QFileDialog.getSaveFileName(
@@ -1384,6 +1449,13 @@ class InstallationSheetDialog(QDialog):
             parent=styles["Normal"],
             fontSize=9,
         )
+        section_title_style = ParagraphStyle(
+            "SectionTitle",
+            parent=styles["Normal"],
+            fontSize=9,
+            fontName="Helvetica-Bold",
+            textColor=colors.HexColor("#1F497D"),
+        )
 
         doc = SimpleDocTemplate(
             pdf_path,
@@ -1400,16 +1472,29 @@ class InstallationSheetDialog(QDialog):
         story.append(HRFlowable(width="100%", color=colors.HexColor("#4472C4"), thickness=1.5))
         story.append(Spacer(1, 8 * mm))
 
-        # Build table rows from the dynamic field list
+        # Build table rows from the dynamic field list.
+        # section_title rows span both columns; track their row indices so the
+        # TableStyle can apply SPAN and a distinct background colour.
         table_data = [
             [
                 Paragraph("<b>Field</b>", field_label_style),
                 Paragraph("<b>Value</b>", field_label_style),
             ]
         ]
+        section_title_rows: List[int] = []
         for field in fields:
             label_text = field.get("label", "")
             field_type = field.get("type", "text").lower()
+
+            if field_type == "section_title":
+                # Render as a full-width header row that spans both columns.
+                row_idx = len(table_data)
+                section_title_rows.append(row_idx)
+                table_data.append([
+                    Paragraph(label_text, section_title_style),
+                    Paragraph("", field_value_style),
+                ])
+                continue
 
             if field_type == "conditional":
                 # Show the boolean answer + up to two associated text notes
@@ -1472,10 +1557,11 @@ class InstallationSheetDialog(QDialog):
 
         tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
         header_bg = colors.HexColor("#4472C4")
+        section_bg = colors.HexColor("#D6E4F0")
         even_bg = colors.HexColor("#DCE6F1")
         white = colors.white
 
-        tbl_style = TableStyle([
+        tbl_style_cmds = [
             ("BACKGROUND", (0, 0), (-1, 0), header_bg),
             ("TEXTCOLOR",  (0, 0), (-1, 0), white),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [white, even_bg]),
@@ -1485,7 +1571,15 @@ class InstallationSheetDialog(QDialog):
             ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
             ("LEFTPADDING",   (0, 0), (-1, -1), 6),
             ("RIGHTPADDING",  (0, 0), (-1, -1), 6),
-        ])
+        ]
+        # Merge both columns for every section-title row and apply a distinct
+        # background colour so the heading stands out visually.
+        for row_idx in section_title_rows:
+            tbl_style_cmds.append(("SPAN", (0, row_idx), (1, row_idx)))
+            tbl_style_cmds.append(("BACKGROUND", (0, row_idx), (1, row_idx), section_bg))
+            tbl_style_cmds.append(("TEXTCOLOR", (0, row_idx), (1, row_idx), colors.HexColor("#1F497D")))
+
+        tbl_style = TableStyle(tbl_style_cmds)
         tbl.setStyle(tbl_style)
         story.append(tbl)
 
