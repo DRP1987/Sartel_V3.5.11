@@ -18,6 +18,9 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 
+# Available CAN baudrates
+_CAN_BAUDRATES = [125000, 250000, 500000, 1000000]
+
 
 # ---------------------------------------------------------------------------
 # Helpers: locate the config folder
@@ -57,6 +60,19 @@ def _load_sheets_config() -> List[Dict[str, Any]]:
 def _excel_template_path(filename: str) -> str:
     """Return the absolute path for a template Excel file stored in config/."""
     return os.path.join(_config_dir(), filename)
+
+
+def _load_config_names() -> List[str]:
+    """Return the list of configuration names from configurations.json."""
+    path = os.path.join(_config_dir(), "configurations.json")
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return [c.get("name", "") for c in data.get("configurations", []) if c.get("name")]
+    except Exception:
+        return []
 
 
 def _resolve_cell_ref(ws, cell_ref: str) -> str:
@@ -311,6 +327,23 @@ class ConditionalWidget(QWidget):
         if self._no_container is not None:
             self._no_container.setVisible(False)
 
+    def set_values(self, values: Dict[str, Any]):
+        """Populate widget from a ``{cell_ref: value}`` mapping (e.g. from a saved form)."""
+        self.clear()
+        bool_val = values.get(self._checkbox_cell)
+        if bool_val is True:
+            self._yes_radio.setChecked(True)
+            if self._yes_text_cell and self._yes_text is not None:
+                self._yes_text.setPlainText(str(values.get(self._yes_text_cell, "")))
+            if self._yes_text_cell2 and self._yes_text2 is not None:
+                self._yes_text2.setPlainText(str(values.get(self._yes_text_cell2, "")))
+        elif bool_val is False:
+            self._no_radio.setChecked(True)
+            if self._no_text_cell and self._no_text is not None:
+                self._no_text.setPlainText(str(values.get(self._no_text_cell, "")))
+            if self._no_text_cell2 and self._no_text2 is not None:
+                self._no_text2.setPlainText(str(values.get(self._no_text_cell2, "")))
+
 
 # ---------------------------------------------------------------------------
 # Checkbox-group widget
@@ -469,6 +502,21 @@ class CheckboxGroupWidget(QWidget):
             elif isinstance(widget, QLineEdit):
                 widget.clear()
 
+    def set_values(self, values: Dict[str, Any]):
+        """Populate widget from a ``{cell_ref: value}`` mapping (e.g. from a saved form)."""
+        self.clear()
+        for entry in self._option_checkboxes:
+            cell = entry["cell"]
+            if cell and cell in values:
+                entry["checkbox"].setChecked(bool(values[cell]))
+        for cell_ref, widget in self._sub_widgets.items():
+            if cell_ref in values:
+                val = str(values[cell_ref])
+                if isinstance(widget, QTextEdit):
+                    widget.setPlainText(val)
+                elif isinstance(widget, QLineEdit):
+                    widget.setText(val)
+
 
 # ---------------------------------------------------------------------------
 # Sheet-selection dialog (shown before the form)
@@ -513,11 +561,14 @@ class _SheetSelectionDialog(QDialog):
 # ---------------------------------------------------------------------------
 
 class InstallationSheetDialog(QDialog):
-    """Pop-up dialog for filling and exporting the installation sheet.
+    """Modeless dialog for filling and exporting the installation sheet.
 
     Opens a sheet-selection dropdown first, then renders a dynamic form whose
     fields (text, multiline, checkbox, auto_fill, or checkbox_group) and Excel
     cell mappings are driven by ``config/installation_sheets.json``.
+
+    The dialog is non-blocking: calling ``show()`` keeps the main application
+    fully usable while the sheet is open.
     """
 
     def __init__(self, parent=None, configuration_name: Optional[str] = None,
@@ -525,7 +576,14 @@ class InstallationSheetDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Fill up Installation Sheet")
         self.setMinimumSize(640, 700)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint)
+        # Qt.Window makes the dialog modeless and gives it its own taskbar entry;
+        # WindowMaximizeButtonHint adds the maximise button.
+        self.setWindowFlags(
+            Qt.Window
+            | Qt.WindowMinimizeButtonHint
+            | Qt.WindowMaximizeButtonHint
+            | Qt.WindowCloseButtonHint
+        )
 
         self._uploaded_pictures: List[str] = []
         self._field_widgets: Dict[str, QWidget] = {}   # cell_ref -> widget
@@ -649,25 +707,37 @@ class InstallationSheetDialog(QDialog):
                 # Auto-fill field: value is populated automatically from context.
                 # "auto_source" can be "config_name" or "baudrate".
                 auto_source = field.get("auto_source", "")
-                if auto_source == "config_name":
-                    auto_value = self._configuration_name or ""
-                    editable = not bool(auto_value)
-                elif auto_source == "baudrate":
-                    auto_value = str(self._baudrate) if self._baudrate is not None else ""
-                    # Editable when offline (no auto-detected baudrate)
-                    editable = self._is_offline and not auto_value
+                if auto_source == "baudrate":
+                    # Baudrate: show a dropdown of available CAN baudrates.
+                    widget = QComboBox()
+                    widget.setMinimumHeight(28)
+                    for br in _CAN_BAUDRATES:
+                        widget.addItem(str(br), br)
+                    # Pre-select the detected baudrate when connected
+                    if self._baudrate is not None:
+                        idx = widget.findData(self._baudrate)
+                        if idx >= 0:
+                            widget.setCurrentIndex(idx)
+                    widget.setToolTip(f"Select CAN baudrate  |  {cell_hint}")
+                elif auto_source == "config_name":
+                    # Configuration: show a dropdown of available configurations.
+                    config_names = _load_config_names()
+                    widget = QComboBox()
+                    widget.setMinimumHeight(28)
+                    if config_names:
+                        widget.addItem("")  # blank/unselected option
+                        widget.addItems(config_names)
+                    else:
+                        widget.addItem("")
+                    # Pre-select the current configuration
+                    if self._configuration_name:
+                        idx = widget.findText(self._configuration_name)
+                        if idx >= 0:
+                            widget.setCurrentIndex(idx)
+                    widget.setToolTip(f"Select configuration  |  {cell_hint}")
                 else:
                     auto_value = ""
-                    editable = True
-                widget = QLineEdit()
-                widget.setText(auto_value)
-                widget.setReadOnly(not editable)
-                if not editable:
-                    widget.setStyleSheet(
-                        "QLineEdit { background-color: #EEF2F7; color: #444; }"
-                    )
-                    widget.setToolTip(f"Auto-filled from application context  |  {cell_hint}")
-                else:
+                    widget = QLineEdit()
                     widget.setPlaceholderText(f"Enter {label_text.lower()} here…")
                     widget.setToolTip(
                         f"Enter manually (not available in current mode)  |  {cell_hint}"
@@ -731,6 +801,16 @@ class InstallationSheetDialog(QDialog):
         self._add_pics_btn.clicked.connect(self._add_pictures)
         self._add_pics_btn.setMinimumHeight(36)
 
+        self._save_btn = QPushButton("💾  Save")
+        self._save_btn.setToolTip("Save the current form data to a JSON file for later use")
+        self._save_btn.clicked.connect(self._save_form)
+        self._save_btn.setMinimumHeight(36)
+
+        self._load_btn = QPushButton("📂  Load")
+        self._load_btn.setToolTip("Load a previously saved form from a JSON file")
+        self._load_btn.clicked.connect(self._load_form)
+        self._load_btn.setMinimumHeight(36)
+
         self._create_pdf_btn = QPushButton("📄  Create PDF")
         self._create_pdf_btn.setToolTip("Fill the Excel template and export it to PDF")
         self._create_pdf_btn.clicked.connect(self._create_pdf)
@@ -747,6 +827,8 @@ class InstallationSheetDialog(QDialog):
         self._clear_btn.setMinimumHeight(36)
 
         btn_layout.addWidget(self._add_pics_btn)
+        btn_layout.addWidget(self._save_btn)
+        btn_layout.addWidget(self._load_btn)
         btn_layout.addStretch()
         btn_layout.addWidget(self._clear_btn)
         btn_layout.addWidget(self._create_pdf_btn)
@@ -869,6 +951,86 @@ class InstallationSheetDialog(QDialog):
         self._refresh_picture_grid()
 
     # ------------------------------------------------------------------
+    # Slot: Save / Load form
+    # ------------------------------------------------------------------
+
+    def _save_form(self):
+        """Save the current form state (field values + picture paths) to a JSON file."""
+        sheet_def = self._current_sheet_def or {}
+        default_name = f"installation_{sheet_def.get('id', 'sheet')}.json"
+        save_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Installation Sheet", default_name,
+            "Installation Sheet Files (*.json);;All Files (*)"
+        )
+        if not save_path:
+            return
+
+        data = {
+            "sheet_id": sheet_def.get("id", ""),
+            "field_values": self._read_field_values(),
+            "pictures": list(self._uploaded_pictures),
+        }
+        try:
+            with open(save_path, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, indent=2, ensure_ascii=False)
+            QMessageBox.information(
+                self, "Saved",
+                f"Form data saved successfully:\n{save_path}",
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Save Error", f"Could not save form:\n{exc}")
+
+    def _load_form(self):
+        """Load a previously saved form JSON and populate all widgets."""
+        load_path, _ = QFileDialog.getOpenFileName(
+            self, "Load Installation Sheet", "",
+            "Installation Sheet Files (*.json);;All Files (*)"
+        )
+        if not load_path:
+            return
+
+        try:
+            with open(load_path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except Exception as exc:
+            QMessageBox.critical(self, "Load Error", f"Could not load form:\n{exc}")
+            return
+
+        field_values: Dict[str, Any] = data.get("field_values", {})
+        pictures: List[str] = data.get("pictures", [])
+
+        # Restore widget values
+        for cell_ref, widget in self._field_widgets.items():
+            if isinstance(widget, ConditionalWidget):
+                widget.set_values(field_values)
+            elif isinstance(widget, CheckboxGroupWidget):
+                widget.set_values(field_values)
+            elif isinstance(widget, QComboBox):
+                val = field_values.get(cell_ref, "")
+                idx = widget.findText(str(val))
+                if idx >= 0:
+                    widget.setCurrentIndex(idx)
+            elif isinstance(widget, QLineEdit):
+                if not widget.isReadOnly():
+                    widget.setText(str(field_values.get(cell_ref, "")))
+            elif isinstance(widget, QTextEdit):
+                widget.setPlainText(str(field_values.get(cell_ref, "")))
+            elif isinstance(widget, QCheckBox):
+                widget.setChecked(bool(field_values.get(cell_ref, False)))
+
+        # Restore pictures (only keep paths that still exist on disk)
+        self._uploaded_pictures = [p for p in pictures if os.path.isfile(p)]
+        missing = [p for p in pictures if not os.path.isfile(p)]
+        self._refresh_picture_grid()
+
+        if missing:
+            QMessageBox.warning(
+                self, "Missing Pictures",
+                "The following picture files could not be found and were skipped:\n"
+                + "\n".join(missing),
+            )
+
+    # ------------------------------------------------------------------
     # Slot: Create PDF
     # ------------------------------------------------------------------
 
@@ -923,6 +1085,8 @@ class InstallationSheetDialog(QDialog):
                 values.update(widget.get_values())
             elif isinstance(widget, CheckboxGroupWidget):
                 values.update(widget.get_values())
+            elif isinstance(widget, QComboBox):
+                values[cell_ref] = widget.currentText().strip()
             elif isinstance(widget, QLineEdit):
                 values[cell_ref] = widget.text().strip()
             elif isinstance(widget, QTextEdit):
