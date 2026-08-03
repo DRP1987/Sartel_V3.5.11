@@ -1576,7 +1576,15 @@ class MonitoringScreen(QWidget):
     # ------------------------------------------------------------------
 
     def _open_installation_sheet(self):
-        """Open the installation sheet dialog."""
+        """Open the installation sheet dialog (modeless – does not block the main app)."""
+        # If a dialog is already open, bring it to the front instead of creating a new one
+        if hasattr(self, '_install_sheet_dialog') and self._install_sheet_dialog is not None:
+            dlg = self._install_sheet_dialog
+            if dlg.isVisible():
+                dlg.raise_()
+                dlg.activateWindow()
+                return
+
         config_name = self.configuration.get('name') if self.configuration else None
         dialog = InstallationSheetDialog(
             parent=self,
@@ -1584,4 +1592,7 @@ class MonitoringScreen(QWidget):
             baudrate=self.baudrate,
             is_offline=not self.connected,
         )
-        dialog.exec_()
+        if getattr(dialog, '_cancelled', False):
+            return
+        self._install_sheet_dialog = dialog
+        dialog.show()
