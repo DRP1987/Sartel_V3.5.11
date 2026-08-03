@@ -9,10 +9,10 @@
       "checkbox_yes_char": "☑",
       "checkbox_no_char": "☐",
       "fields": [
-        {"label": "Client / Company Name",  "cell": "B21", "type": "text"},
-        {"label": "Site / Project Name",    "cell": "B22", "type": "text"},
-        {"label": "Installation Date",      "cell": "B23", "type": "text"},
-        {"label": "Technician Name",        "cell": "B24", "type": "text"},
+        {"label": "Client / Company Name",  "cell": "B21", "type": "text", "required": true},
+        {"label": "Site / Project Name",    "cell": "B22", "type": "text", "required": true},
+        {"label": "Installation Date",      "cell": "B23", "type": "text", "required": true},
+        {"label": "Technician Name",        "cell": "B24", "type": "text", "required": true},
         {"label": "Vehicle Type / Model",   "cell": "B25", "type": "text"},
         {"label": "Vehicle Serial Number",  "cell": "B26", "type": "text"},
         {"label": "Engine Type",            "cell": "B27", "type": "text"},
@@ -30,9 +30,11 @@
           "type": "auto_fill",
           "auto_source": "config_name"
         },
+        {"label": "Connection for Supplies", "type": "section_title"},
         {
           "label": "Is the crane control CanBus connected for LMB and Crane operation?",
           "type": "conditional",
+          "required": true,
           "checkbox_cell": "B33",
           "yes_text_label": "Connection Details",
           "yes_text_cell": "B34",
@@ -55,10 +57,10 @@
       "checkbox_yes_char": "☑",
       "checkbox_no_char": "☐",
       "fields": [
-        {"label": "Client / Company Name",  "cell": "B21", "type": "text"},
-        {"label": "Installation Date",      "cell": "B22", "type": "text"},
-        {"label": "Technician Name",        "cell": "B23", "type": "text"},
-        {"label": "IMEI Number",            "cell": "AB21","type": "text"},
+        {"label": "Client / Company Name",  "cell": "B21", "type": "text", "required": true},
+        {"label": "Installation Date",      "cell": "B22", "type": "text", "required": true},
+        {"label": "Technician Name",        "cell": "B23", "type": "text", "required": true},
+        {"label": "IMEI Number",            "cell": "AB21","type": "text", "required": true},
         {"label": "Vehicle Registration",   "cell": "B24", "type": "text"},
         {"label": "Vehicle Make / Model",   "cell": "B25", "type": "text"},
         {
@@ -73,6 +75,7 @@
           "type": "auto_fill",
           "auto_source": "baudrate"
         },
+        {"label": "Hardware Installation Checks", "type": "section_title"},
         {
           "label": "Hardware Installation Checks",
           "type": "checkbox_group",
@@ -110,9 +113,11 @@
             }
           ]
         },
+        {"label": "Connection for Supplies", "type": "section_title"},
         {
           "label": "Is the crane control CanBus connected for LMB and Crane operation?",
           "type": "conditional",
+          "required": true,
           "checkbox_cell": "C34",
           "yes_text_label": "Connection Details",
           "yes_text_cell": "D34",
