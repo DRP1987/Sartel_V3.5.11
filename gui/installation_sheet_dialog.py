@@ -392,8 +392,16 @@ class CheckboxGroupWidget(QWidget):
         }
     """
 
-    def __init__(self, field_def: Dict[str, Any], parent=None):
+    def __init__(
+        self,
+        field_def: Dict[str, Any],
+        baudrate: Optional[int] = None,
+        configuration_name: Optional[str] = None,
+        parent=None,
+    ):
         super().__init__(parent)
+        self._baudrate = baudrate
+        self._configuration_name = configuration_name
         self._option_checkboxes: List[Dict[str, Any]] = []
         # Maps cell_ref → QWidget for sub-questions
         self._sub_widgets: Dict[str, QWidget] = {}
@@ -441,6 +449,33 @@ class CheckboxGroupWidget(QWidget):
                         sq_widget.setPlaceholderText(f"Enter {sq_label.lower()} here…")
                         sq_widget.setFixedHeight(60)
                         sq_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                    elif sq_type == "auto_fill":
+                        auto_source = sq.get("auto_source", "")
+                        if auto_source == "baudrate":
+                            sq_widget = QComboBox()
+                            sq_widget.setMinimumHeight(28)
+                            for br in _CAN_BAUDRATES:
+                                sq_widget.addItem(str(br), br)
+                            if self._baudrate is not None:
+                                idx = sq_widget.findData(self._baudrate)
+                                if idx >= 0:
+                                    sq_widget.setCurrentIndex(idx)
+                            sq_widget.setToolTip(f"Select CAN baudrate")
+                        elif auto_source == "config_name":
+                            config_names = _load_config_names()
+                            sq_widget = QComboBox()
+                            sq_widget.setMinimumHeight(28)
+                            sq_widget.addItem("")
+                            if config_names:
+                                sq_widget.addItems(config_names)
+                            if self._configuration_name:
+                                idx = sq_widget.findText(self._configuration_name)
+                                if idx >= 0:
+                                    sq_widget.setCurrentIndex(idx)
+                            sq_widget.setToolTip(f"Select configuration")
+                        else:
+                            sq_widget = QLineEdit()
+                            sq_widget.setPlaceholderText(f"Enter {sq_label.lower()} here…")
                     elif sq_type == "dropdown":
                         sq_widget = QComboBox()
                         sq_widget.setMinimumHeight(28)
@@ -723,7 +758,11 @@ class InstallationSheetDialog(QDialog):
                 # an Excel cell, with optional per-checkbox sub-questions.
                 lbl.setWordWrap(True)
                 lbl.setAlignment(Qt.AlignRight | Qt.AlignTop)
-                widget = CheckboxGroupWidget(field)
+                widget = CheckboxGroupWidget(
+                    field,
+                    baudrate=self._baudrate,
+                    configuration_name=self._configuration_name,
+                )
                 # The group widget manages its own cell→widget mapping; register
                 # it under a sentinel key so _read_field_values can find it.
                 sentinel = field.get("group_id") or f"__cbg_{len(self._field_widgets)}"
