@@ -110,6 +110,18 @@
               "sub_questions": [
                 {"label": "Test Result / Notes",     "cell": "D33", "type": "multiline"}
               ]
+            },
+            {
+              "label": "Liebherr newer than 2018",
+              "cell": "C36",
+              "sub_questions": [
+                {
+                  "label": "Crane Model Series",
+                  "cell": "D36",
+                  "type": "dropdown",
+                  "options": ["LTM 1030-2.1", "LTM 1040-2.1", "LTM 1050-3.1", "LTM 1060-3.1", "LTM 1070-4.1", "LTM 1090-4.2", "LTM 1100-4.2", "LTM 1100-5.2", "LTM 1130-5.1", "Other"]
+                }
+              ]
             }
           ]
         },
