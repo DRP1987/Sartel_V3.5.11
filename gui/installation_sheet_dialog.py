@@ -441,6 +441,13 @@ class CheckboxGroupWidget(QWidget):
                         sq_widget.setPlaceholderText(f"Enter {sq_label.lower()} here…")
                         sq_widget.setFixedHeight(60)
                         sq_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                    elif sq_type == "dropdown":
+                        sq_widget = QComboBox()
+                        sq_widget.setMinimumHeight(28)
+                        sq_widget.addItem("")  # blank/unselected option
+                        for opt_item in sq.get("options", []):
+                            sq_widget.addItem(str(opt_item))
+                        sq_widget.setToolTip(f"Select {sq_label.lower()}")
                     else:  # "text" (default)
                         sq_widget = QLineEdit()
                         sq_widget.setPlaceholderText(f"Enter {sq_label.lower()} here…")
@@ -486,6 +493,8 @@ class CheckboxGroupWidget(QWidget):
         for cell_ref, widget in self._sub_widgets.items():
             if isinstance(widget, QTextEdit):
                 result[cell_ref] = widget.toPlainText().strip()
+            elif isinstance(widget, QComboBox):
+                result[cell_ref] = widget.currentText().strip()
             elif isinstance(widget, QLineEdit):
                 result[cell_ref] = widget.text().strip()
         return result
@@ -499,6 +508,8 @@ class CheckboxGroupWidget(QWidget):
         for widget in self._sub_widgets.values():
             if isinstance(widget, QTextEdit):
                 widget.clear()
+            elif isinstance(widget, QComboBox):
+                widget.setCurrentIndex(0)
             elif isinstance(widget, QLineEdit):
                 widget.clear()
 
@@ -514,6 +525,10 @@ class CheckboxGroupWidget(QWidget):
                 val = str(values[cell_ref])
                 if isinstance(widget, QTextEdit):
                     widget.setPlainText(val)
+                elif isinstance(widget, QComboBox):
+                    idx = widget.findText(val)
+                    if idx >= 0:
+                        widget.setCurrentIndex(idx)
                 elif isinstance(widget, QLineEdit):
                     widget.setText(val)
 
