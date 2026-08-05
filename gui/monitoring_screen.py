@@ -1580,14 +1580,18 @@ class MonitoringScreen(QWidget):
         # If a dialog is already open, bring it to the front instead of creating a new one
         if hasattr(self, '_install_sheet_dialog') and self._install_sheet_dialog is not None:
             dlg = self._install_sheet_dialog
-            if dlg.isVisible():
+            if dlg.isVisible() or dlg.isMinimized():
+                dlg.showNormal()
                 dlg.raise_()
                 dlg.activateWindow()
                 return
 
         config_name = self.configuration.get('name') if self.configuration else None
+        # Use the top-level window as parent so the dialog is not destroyed
+        # when this MonitoringScreen is removed from the stack and deleted.
+        top_level = self.window()
         dialog = InstallationSheetDialog(
-            parent=self,
+            parent=top_level,
             configuration_name=config_name,
             baudrate=self.baudrate,
             is_offline=not self.connected,

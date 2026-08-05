@@ -496,10 +496,13 @@ class CheckboxGroupWidget(QWidget):
 
             outer.addWidget(opt_container)
 
+            # Collect the cell refs for sub-questions belonging to this option
+            sub_cells = [sq.get("cell", "") for sq in sub_questions if sq.get("cell", "")]
             entry = {
                 "cell": opt_cell,
                 "checkbox": cb,
                 "sub_container": sub_container,
+                "sub_cells": sub_cells,
             }
             self._option_checkboxes.append(entry)
 
@@ -516,22 +519,25 @@ class CheckboxGroupWidget(QWidget):
 
     def get_values(self) -> Dict[str, Any]:
         """Return ``{cell_ref: bool}`` for every option checkbox plus any
-        visible sub-question cell values."""
+        sub-question cell values for checked checkboxes only."""
         result: Dict[str, Any] = {}
         for entry in self._option_checkboxes:
             cell = entry["cell"]
             checked: bool = entry["checkbox"].isChecked()
             if cell:
                 result[cell] = checked
-            # Always read sub-question values so unchecked sub-fields also
-            # contribute (they will be empty strings)
-        for cell_ref, widget in self._sub_widgets.items():
-            if isinstance(widget, QTextEdit):
-                result[cell_ref] = widget.toPlainText().strip()
-            elif isinstance(widget, QComboBox):
-                result[cell_ref] = widget.currentText().strip()
-            elif isinstance(widget, QLineEdit):
-                result[cell_ref] = widget.text().strip()
+            # Only include sub-question values when the parent checkbox is checked
+            if checked:
+                for sub_cell in entry.get("sub_cells", []):
+                    widget = self._sub_widgets.get(sub_cell)
+                    if widget is None:
+                        continue
+                    if isinstance(widget, QTextEdit):
+                        result[sub_cell] = widget.toPlainText().strip()
+                    elif isinstance(widget, QComboBox):
+                        result[sub_cell] = widget.currentText().strip()
+                    elif isinstance(widget, QLineEdit):
+                        result[sub_cell] = widget.text().strip()
         return result
 
     def clear(self):
