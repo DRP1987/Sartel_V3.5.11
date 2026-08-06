@@ -720,8 +720,22 @@ class InstallationSheetDialog(QDialog):
             field_type = field.get("type", "text").lower()
             is_required = field.get("required", False)
 
+            if field_type == "section_title_boxed":
+                # Level-1 primary group header: solid coloured box with white text.
+                boxed_lbl = QLabel(label_text)
+                boxed_lbl.setStyleSheet(
+                    "font-size: 10pt; font-weight: bold; color: #FFFFFF;"
+                    " background-color: #1F497D;"
+                    " border-radius: 4px;"
+                    " padding: 4px 8px;"
+                    " margin-top: 10px;"
+                )
+                boxed_lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                form_layout.addRow(boxed_lbl)
+                continue
+
             if field_type == "section_title":
-                # Stand-alone title that groups the questions below it.
+                # Level-2 secondary group header: bold underlined label.
                 # Rendered as a full-width styled label with no associated widget.
                 section_lbl = QLabel(label_text)
                 section_lbl.setStyleSheet(
@@ -1120,8 +1134,9 @@ class InstallationSheetDialog(QDialog):
         - ``conditional``: at least one of the Yes / No radio buttons must be
           selected (i.e. ``checkbox_cell`` must be present in the collected values).
 
-        ``checkbox``, ``checkbox_group``, and ``section_title`` fields are always
-        considered valid because checkboxes inherently carry a value.
+        ``checkbox``, ``checkbox_group``, ``section_title``, and
+        ``section_title_boxed`` fields are always considered valid because
+        checkboxes inherently carry a value and title rows have no input.
         """
         missing: List[str] = []
         sheet_def = self._current_sheet_def or {}
@@ -1516,6 +1531,13 @@ class InstallationSheetDialog(QDialog):
             fontName="Helvetica-Bold",
             textColor=colors.HexColor("#1F497D"),
         )
+        section_title_boxed_style = ParagraphStyle(
+            "SectionTitleBoxed",
+            parent=styles["Normal"],
+            fontSize=10,
+            fontName="Helvetica-Bold",
+            textColor=colors.white,
+        )
 
         doc = SimpleDocTemplate(
             pdf_path,
@@ -1542,9 +1564,20 @@ class InstallationSheetDialog(QDialog):
             ]
         ]
         section_title_rows: List[int] = []
+        section_title_boxed_rows: List[int] = []
         for field in fields:
             label_text = field.get("label", "")
             field_type = field.get("type", "text").lower()
+
+            if field_type == "section_title_boxed":
+                # Render as a full-width primary header row (dark background, white text).
+                row_idx = len(table_data)
+                section_title_boxed_rows.append(row_idx)
+                table_data.append([
+                    Paragraph(label_text, section_title_boxed_style),
+                    Paragraph("", field_value_style),
+                ])
+                continue
 
             if field_type == "section_title":
                 # Render as a full-width header row that spans both columns.
@@ -1638,6 +1671,12 @@ class InstallationSheetDialog(QDialog):
             tbl_style_cmds.append(("SPAN", (0, row_idx), (1, row_idx)))
             tbl_style_cmds.append(("BACKGROUND", (0, row_idx), (1, row_idx), section_bg))
             tbl_style_cmds.append(("TEXTCOLOR", (0, row_idx), (1, row_idx), colors.HexColor("#1F497D")))
+        # Merge and style primary (boxed) section-title rows with a dark background.
+        boxed_bg = colors.HexColor("#1F497D")
+        for row_idx in section_title_boxed_rows:
+            tbl_style_cmds.append(("SPAN", (0, row_idx), (1, row_idx)))
+            tbl_style_cmds.append(("BACKGROUND", (0, row_idx), (1, row_idx), boxed_bg))
+            tbl_style_cmds.append(("TEXTCOLOR", (0, row_idx), (1, row_idx), colors.white))
 
         tbl_style = TableStyle(tbl_style_cmds)
         tbl.setStyle(tbl_style)
