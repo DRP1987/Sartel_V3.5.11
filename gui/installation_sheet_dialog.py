@@ -1134,9 +1134,10 @@ class InstallationSheetDialog(QDialog):
         - ``conditional``: at least one of the Yes / No radio buttons must be
           selected (i.e. ``checkbox_cell`` must be present in the collected values).
 
-        ``checkbox``, ``checkbox_group``, ``section_title``, and
-        ``section_title_boxed`` fields are always considered valid because
-        checkboxes inherently carry a value and title rows have no input.
+        ``checkbox`` and ``checkbox_group`` fields are always considered valid
+        because checkboxes inherently carry a value; ``section_title`` and
+        ``section_title_boxed`` fields are skipped because they have no
+        associated input.
         """
         missing: List[str] = []
         sheet_def = self._current_sheet_def or {}
@@ -1575,7 +1576,7 @@ class InstallationSheetDialog(QDialog):
                 section_title_boxed_rows.append(row_idx)
                 table_data.append([
                     Paragraph(label_text, section_title_boxed_style),
-                    Paragraph("", field_value_style),
+                    Paragraph("", section_title_boxed_style),
                 ])
                 continue
 
