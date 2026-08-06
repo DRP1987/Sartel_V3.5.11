@@ -30,7 +30,7 @@
           "type": "auto_fill",
           "auto_source": "config_name"
         },
-        {"label": "Connection for Supplies", "type": "section_title"},
+        {"label": "Connection for Supplies", "type": "section_title_boxed"},
         {
           "label": "Is the crane control CanBus connected for LMB and Crane operation?",
           "type": "conditional",
@@ -75,7 +75,7 @@
           "type": "auto_fill",
           "auto_source": "baudrate"
         },
-        {"label": "Hardware Installation Checks", "type": "section_title"},
+        {"label": "Hardware Installation Checks", "type": "section_title_boxed"},
         {
           "label": "Hardware Installation Checks",
           "type": "checkbox_group",
@@ -125,7 +125,7 @@
             }
           ]
         },
-        {"label": "Connection for Supplies", "type": "section_title"},
+        {"label": "Connection for Supplies", "type": "section_title_boxed"},
         {
           "label": "Is the crane control CanBus connected for LMB and Crane operation?",
           "type": "conditional",
