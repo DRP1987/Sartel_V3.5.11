@@ -1,8 +1,10 @@
 """Installation sheet dialog for filling and exporting installation data."""
 
+import glob
 import json
 import os
 import re
+import subprocess
 import sys
 import shutil
 import tempfile
@@ -123,6 +125,49 @@ def _com_cell_ref(cell_ref: str) -> str:
     if ":" in cell_ref:
         return cell_ref.split(":")[0].strip()
     return cell_ref
+
+
+def _find_soffice() -> Optional[str]:
+    """Return the path to the ``soffice`` executable, or ``None`` if not found.
+
+    Search order:
+    1. ``soffice`` on the system PATH (via :func:`shutil.which`).
+    2. Common Windows install paths for LibreOffice and OpenOffice.
+    3. Common Linux/macOS fixed paths.
+    """
+    # 1. PATH
+    found = shutil.which("soffice")
+    if found:
+        return found
+
+    # 2. Windows fixed and glob paths
+    windows_candidates = [
+        r"C:\Program Files\LibreOffice\program\soffice.exe",
+        r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+    ]
+    windows_glob_patterns = [
+        r"C:\Program Files\OpenOffice*\program\soffice.exe",
+        r"C:\Program Files (x86)\OpenOffice*\program\soffice.exe",
+    ]
+    for path in windows_candidates:
+        if os.path.isfile(path):
+            return path
+    for pattern in windows_glob_patterns:
+        matches = glob.glob(pattern)
+        if matches:
+            return matches[0]
+
+    # 3. Linux / macOS fixed paths
+    unix_candidates = [
+        "/usr/bin/soffice",
+        "/usr/local/bin/soffice",
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+    ]
+    for path in unix_candidates:
+        if os.path.isfile(path):
+            return path
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1321,7 +1366,13 @@ class InstallationSheetDialog(QDialog):
           5. Export to PDF with ``ExportAsFixedFormat``.
           6. Close the temporary workbook without saving.
 
-        Attempt 2 – reportlab fallback (no Excel / win32com available):
+        Attempt 2 – LibreOffice / OpenOffice headless conversion:
+          Use ``soffice --headless --convert-to pdf`` to convert a filled-in
+          ``xlsx`` copy to PDF.  Values are written with openpyxl; pictures are
+          embedded via :meth:`_embed_pictures_in_excel`.  Falls through silently
+          if ``soffice`` cannot be found or the conversion fails.
+
+        Attempt 3 – reportlab fallback (no Excel / win32com available):
           Render a simple formatted PDF directly from the collected field values
           using reportlab.  openpyxl is not required for this path.
         """
@@ -1477,11 +1528,94 @@ class InstallationSheetDialog(QDialog):
                 pass
 
         # ------------------------------------------------------------------
-        # Attempt 2: reportlab fallback (no Excel / win32com available).
+        # Attempt 2: LibreOffice / OpenOffice headless conversion.
+        # ------------------------------------------------------------------
+        if not pdf_created:
+            try:
+                soffice = _find_soffice()
+                if soffice:
+                    import openpyxl
+
+                    tmp_dir = tempfile.mkdtemp(prefix="sartel_install_lo_")
+                    try:
+                        tmp_xlsx = os.path.join(tmp_dir, "installation_sheet_filled.xlsx")
+                        shutil.copy2(tpl, tmp_xlsx)
+
+                        wb = openpyxl.load_workbook(tmp_xlsx)
+                        ws = (
+                            wb.worksheets[sheet_index]
+                            if sheet_index < len(wb.worksheets)
+                            else wb.active
+                        )
+
+                        # Pre-fill untouched checkbox cells with ☐.
+                        for fld in fields:
+                            ftype = fld.get("type", "text").lower()
+                            if ftype == "checkbox":
+                                c = fld.get("cell", "")
+                                if c and c not in field_values:
+                                    ws[_resolve_cell_ref(ws, c)] = checkbox_no_char
+                            elif ftype == "conditional":
+                                c = fld.get("checkbox_cell", "")
+                                if c and c not in field_values:
+                                    ws[_resolve_cell_ref(ws, c)] = checkbox_no_char
+                            elif ftype == "checkbox_group":
+                                for opt in fld.get("options", []):
+                                    c = opt.get("cell", "")
+                                    if c and c not in field_values:
+                                        ws[_resolve_cell_ref(ws, c)] = checkbox_no_char
+
+                        # Write user-provided field values.
+                        for cell_ref, value in field_values.items():
+                            resolved = _resolve_cell_ref(ws, cell_ref)
+                            if isinstance(value, bool):
+                                ws[resolved] = checkbox_yes_char if value else checkbox_no_char
+                            else:
+                                ws[resolved] = value
+
+                        # Embed uploaded pictures.
+                        self._embed_pictures_in_excel(ws, picture_anchor)
+
+                        wb.save(tmp_xlsx)
+
+                        result = subprocess.run(
+                            [
+                                soffice,
+                                "--headless",
+                                "--convert-to", "pdf",
+                                "--outdir", tmp_dir,
+                                tmp_xlsx,
+                            ],
+                            timeout=60,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                        )
+
+                        if result.returncode == 0:
+                            lo_pdf = os.path.join(
+                                tmp_dir,
+                                os.path.splitext(os.path.basename(tmp_xlsx))[0] + ".pdf",
+                            )
+                            # If the expected filename isn't present, search the
+                            # temp directory for any PDF that soffice may have produced.
+                            if not os.path.isfile(lo_pdf):
+                                candidates = glob.glob(os.path.join(tmp_dir, "*.pdf"))
+                                lo_pdf = candidates[0] if candidates else lo_pdf
+                            if os.path.isfile(lo_pdf):
+                                shutil.copy2(lo_pdf, pdf_path)
+                                pdf_created = True
+                    finally:
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+        # ------------------------------------------------------------------
+        # Attempt 3: reportlab fallback (no Excel / win32com available).
         # ------------------------------------------------------------------
         if not pdf_created:
             self._create_pdf_reportlab(pdf_path, field_values)
             pdf_created = True  # noqa: F841
+
 
     def _create_pdf_reportlab(self, pdf_path: str, field_values: Dict[str, Any]):
         """Generate a formatted PDF using reportlab when Excel COM is not available."""
@@ -1497,7 +1631,8 @@ class InstallationSheetDialog(QDialog):
             from reportlab.lib.enums import TA_CENTER, TA_LEFT
         except ImportError as exc:
             raise RuntimeError(
-                "Neither Microsoft Excel (win32com) nor the 'reportlab' package is available. "
+                "Neither Microsoft Excel (win32com), LibreOffice/OpenOffice (soffice), "
+                "nor the 'reportlab' package is available. "
                 "Install reportlab with:  pip install reportlab"
             ) from exc
 
