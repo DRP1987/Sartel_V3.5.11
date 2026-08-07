@@ -753,8 +753,8 @@ class InstallationSheetDialog(QDialog):
             display_label = f"{label_text} *:" if is_required else f"{label_text}:"
             lbl = QLabel(display_label)
             lbl.setStyleSheet("font-weight: bold; font-size: 9pt;")
-            lbl.setMinimumWidth(220)
-            lbl.setMaximumWidth(260)
+            lbl.setMinimumWidth(320)
+            lbl.setMaximumWidth(400)
             lbl.setWordWrap(True)
             lbl.setAlignment(Qt.AlignRight | Qt.AlignTop)
 
@@ -764,8 +764,8 @@ class InstallationSheetDialog(QDialog):
                 # align it to the top of the row.
                 lbl.setWordWrap(True)
                 lbl.setAlignment(Qt.AlignRight | Qt.AlignTop)
-                lbl.setMinimumWidth(220)
-                lbl.setMaximumWidth(260)
+                lbl.setMinimumWidth(320)
+                lbl.setMaximumWidth(400)
                 checkbox_cell = field.get("checkbox_cell", "")
                 cells_hint = f"Checkbox cell: {checkbox_cell}"
                 if field.get("yes_text_cell"):
@@ -785,8 +785,8 @@ class InstallationSheetDialog(QDialog):
                 # an Excel cell, with optional per-checkbox sub-questions.
                 lbl.setWordWrap(True)
                 lbl.setAlignment(Qt.AlignRight | Qt.AlignTop)
-                lbl.setMinimumWidth(220)
-                lbl.setMaximumWidth(260)
+                lbl.setMinimumWidth(320)
+                lbl.setMaximumWidth(400)
                 widget = CheckboxGroupWidget(
                     field,
                     baudrate=self._baudrate,
