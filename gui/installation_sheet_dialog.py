@@ -754,6 +754,9 @@ class InstallationSheetDialog(QDialog):
             lbl = QLabel(display_label)
             lbl.setStyleSheet("font-weight: bold; font-size: 9pt;")
             lbl.setMinimumWidth(220)
+            lbl.setMaximumWidth(260)
+            lbl.setWordWrap(True)
+            lbl.setAlignment(Qt.AlignRight | Qt.AlignTop)
 
             if field_type == "conditional":
                 # Conditional question: Yes/No radio buttons + conditional text boxes.
