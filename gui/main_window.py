@@ -189,6 +189,7 @@ class MainWindow(QMainWindow):
         self.is_connected = True
         # Update connection status in config screen
         self.config_selection_screen.set_connection_status(True)
+        self.config_selection_screen.set_baudrate(baudrate)
         # Move to configuration selection screen
         self.stacked_widget.setCurrentWidget(self.config_selection_screen)
 
@@ -200,6 +201,7 @@ class MainWindow(QMainWindow):
         self.is_connected = False
         # Update connection status in config screen
         self.config_selection_screen.set_connection_status(False)
+        self.config_selection_screen.set_baudrate(None)
         # Move to configuration selection screen
         self.stacked_widget.setCurrentWidget(self.config_selection_screen)
 

@@ -13,6 +13,7 @@ from config.config_loader import ConfigurationLoader
 from config.app_config import APP_NAME
 from gui.utils import create_logo_widget
 from gui.widgets import ConnectionStatusWidget
+from gui.installation_sheet_dialog import InstallationSheetDialog
 
 
 class ConfigSelectionScreen(QWidget):
@@ -33,6 +34,9 @@ class ConfigSelectionScreen(QWidget):
         self.config_loader = config_loader
         self.configurations = []
         self.connection_status_widget = None
+        self.connected = False
+        self.baudrate = None
+        self._install_sheet_dialog = None
 
         self._init_ui()
         self._load_configurations()
@@ -54,11 +58,25 @@ class ConfigSelectionScreen(QWidget):
             top_bar.addWidget(logo_widget)
         
         top_bar.addStretch()
-        
+
+        # Right-side vertical stack: CAN Status + Install Sheet button
+        right_stack = QVBoxLayout()
+        right_stack.setSpacing(4)
+
         # Connection status in top right
         self.connection_status_widget = ConnectionStatusWidget()
-        top_bar.addWidget(self.connection_status_widget)
-        
+        right_stack.addWidget(self.connection_status_widget, alignment=Qt.AlignRight)
+
+        # "Fill up installation sheet" button below CAN Status
+        self.install_sheet_button = QPushButton("📋  Fill up installation sheet")
+        self.install_sheet_button.setToolTip(
+            "Open the installation sheet form to record site details and export a PDF"
+        )
+        self.install_sheet_button.clicked.connect(self._open_installation_sheet)
+        right_stack.addWidget(self.install_sheet_button, alignment=Qt.AlignRight)
+
+        top_bar.addLayout(right_stack)
+
         layout.addLayout(top_bar)
 
         # Title
@@ -337,9 +355,55 @@ class ConfigSelectionScreen(QWidget):
         Args:
             connected: True if connected, False if offline
         """
+        self.connected = connected
         if self.connection_status_widget:
             self.connection_status_widget.set_connected(connected)
+
+    def set_baudrate(self, baudrate):
+        """
+        Store the currently detected baud rate (used by the installation sheet).
+
+        Args:
+            baudrate: Detected baud rate, or None if offline
+        """
+        self.baudrate = baudrate
 
     def _on_reconnect_requested(self):
         """Handle reconnect button click."""
         self.reconnect_requested.emit()
+
+    # ------------------------------------------------------------------
+    # Installation Sheet
+    # ------------------------------------------------------------------
+
+    def _selected_configuration_name(self):
+        """Return the name of the currently selected configuration, if any."""
+        current_row = self.config_list.currentRow()
+        if 0 <= current_row < len(self.configurations):
+            return self.configurations[current_row].get('name')
+        return None
+
+    def _open_installation_sheet(self):
+        """Open the installation sheet dialog (modeless – does not block the main app)."""
+        # If a dialog is already open, bring it to the front instead of creating a new one
+        if self._install_sheet_dialog is not None:
+            dlg = self._install_sheet_dialog
+            if dlg.isVisible() or dlg.isMinimized():
+                dlg.showNormal()
+                dlg.raise_()
+                dlg.activateWindow()
+                return
+
+        # Use the top-level window as parent so the dialog is not destroyed
+        # when this screen is removed from the stack and deleted.
+        top_level = self.window()
+        dialog = InstallationSheetDialog(
+            parent=top_level,
+            configuration_name=self._selected_configuration_name(),
+            baudrate=self.baudrate,
+            is_offline=not self.connected,
+        )
+        if getattr(dialog, '_cancelled', False):
+            return
+        self._install_sheet_dialog = dialog
+        dialog.show()
