@@ -8,12 +8,14 @@ from functools import partial
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QLabel, QListWidget, QListWidgetItem, QMessageBox,
                              QDialog, QDialogButtonBox)
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, QSize
+from PyQt5.QtGui import QIcon
 from config.config_loader import ConfigurationLoader
 from config.app_config import APP_NAME
 from gui.utils import create_logo_widget
 from gui.widgets import ConnectionStatusWidget
 from gui.installation_sheet_dialog import InstallationSheetDialog
+from utils.resource_path import resource_path
 
 
 class ConfigSelectionScreen(QWidget):
@@ -162,7 +164,14 @@ class ConfigSelectionScreen(QWidget):
                 # Add matched crane models button if data exists
                 crane_models = config.get('matched_crane_models')
                 if crane_models:
-                    crane_button = QPushButton("🏗️")
+                    crane_button = QPushButton()
+                    # Use crane.png icon if available, otherwise fall back to emoji
+                    crane_icon_path = resource_path(os.path.join('assets', 'icons', 'crane.png'))
+                    if os.path.exists(crane_icon_path):
+                        crane_button.setIcon(QIcon(crane_icon_path))
+                        crane_button.setIconSize(QSize(18, 18))
+                    else:
+                        crane_button.setText("🏗️")
                     crane_button.setFixedSize(30, 30)
                     crane_button.setToolTip("Matched crane models")
                     crane_button.setStyleSheet("""
@@ -283,8 +292,6 @@ class ConfigSelectionScreen(QWidget):
         # Ensure it's a PDF
         if not info_pdf.lower().endswith('.pdf'):
             info_pdf = info_pdf + '.pdf'
-    
-        from utils.resource_path import resource_path
     
         try:
             # Get PDF path (no encryption)
